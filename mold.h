@@ -109,8 +109,8 @@ private:
 template <typename C>
 static std::string add_color(C &ctx, std::string msg) {
   if (ctx.arg.color_diagnostics)
-    return "mold: \033[0;1;31m" + msg + ":\033[0m ";
-  return "mold: " + msg + ": ";
+    return "sold: \033[0;1;31m" + msg + ":\033[0m ";
+  return "sold: " + msg + ": ";
 }
 
 template <typename C>

@@ -29,8 +29,8 @@ int main(int argc, char **argv);
 
 static std::string get_mold_version() {
   if (mold_git_hash.empty())
-    return "mold " MOLD_VERSION " (compatible with GNU ld)";
-  return "mold " MOLD_VERSION " (" + mold_git_hash + "; compatible with GNU ld)";
+    return "sold " MOLD_VERSION " (compatible with GNU ld)";
+  return "sold " MOLD_VERSION " (" + mold_git_hash + "; compatible with GNU ld)";
 }
 
 void cleanup() {
