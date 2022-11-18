@@ -32,7 +32,6 @@ necessary packages. You may want to run it as root.
 git clone https://github.com/bluewhalesystems/sold.git
 mkdir sold/build
 cd sold/build
-git checkout v1.7.0
 ../install-build-deps.sh
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=c++ ..
 cmake --build . -j $(nproc)
