@@ -6,4 +6,4 @@ int main() {}
 EOF
 
 $CC -B. -o $t/exe $t/a.o
-readelf -p .comment $t/exe | grep -q 'mold'
+readelf -p .comment $t/exe | grep -q '.old'
