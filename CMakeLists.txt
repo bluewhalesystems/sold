@@ -45,7 +45,7 @@
 
 cmake_minimum_required(VERSION 3.13)
 project(mold VERSION 1.7.1)
-set(MOLD_PRODUCT_NAME "mold")
+set(MOLD_PRODUCT_NAME "sold")
 
 include(CMakeDependentOption)
 include(GNUInstallDirs)
