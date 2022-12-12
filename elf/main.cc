@@ -27,7 +27,7 @@ namespace mold::elf {
 // Read the beginning of a given file and returns its machine type
 // (e.g. EM_X86_64 or EM_386).
 template <typename E>
-static MachineType get_machine_type(Context<E> &ctx, MappedFile<Context<E>> *mf) {
+MachineType get_machine_type(Context<E> &ctx, MappedFile<Context<E>> *mf) {
   auto get_elf_type = [&](u8 *buf) {
     bool is_le = (((EL32Ehdr *)buf)->e_ident[EI_DATA] == ELFDATA2LSB);
     bool is_64;
@@ -243,6 +243,18 @@ MappedFile<Context<E>> *find_library(Context<E> &ctx, std::string name) {
 }
 
 template <typename E>
+MappedFile<Context<E>> *find_from_search_paths(Context<E> &ctx, std::string name) {
+  if (MappedFile<Context<E>> *mf = MappedFile<Context<E>>::open(ctx, name))
+    return mf;
+
+  for (std::string_view dir : ctx.arg.library_paths)
+    if (MappedFile<Context<E>> *mf =
+        MappedFile<Context<E>>::open(ctx, std::string(dir) + "/" + name))
+      return mf;
+  return nullptr;
+}
+
+template <typename E>
 static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
   Timer t(ctx, "read_input_files");
 
@@ -270,16 +282,25 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
     } else if (arg == "--end-lib") {
       ctx.in_lib = false;
     } else if (remove_prefix(arg, "--version-script=")) {
-      parse_version_script(ctx, std::string(arg));
+      MappedFile<Context<E>> *mf = find_from_search_paths(ctx, std::string(arg));
+      if (!mf)
+        Fatal(ctx) << "--version-script: file not found: " << arg;
+      parse_version_script(ctx, mf);
     } else if (remove_prefix(arg, "--dynamic-list=")) {
-      parse_dynamic_list(ctx, std::string(arg));
+      MappedFile<Context<E>> *mf = find_from_search_paths(ctx, std::string(arg));
+      if (!mf)
+        Fatal(ctx) << "--dynamic-list: file not found: " << arg;
+      parse_dynamic_list(ctx, mf);
     } else if (remove_prefix(arg, "--export-dynamic-symbol=")) {
       if (arg == "*")
         ctx.default_version = VER_NDX_GLOBAL;
       else
         ctx.version_patterns.push_back({arg, VER_NDX_GLOBAL, false});
     } else if (remove_prefix(arg, "--export-dynamic-symbol-list=")) {
-      parse_dynamic_list(ctx, std::string(arg));
+      MappedFile<Context<E>> *mf = find_from_search_paths(ctx, std::string(arg));
+      if (!mf)
+        Fatal(ctx) << "--export-dynamic-symbol-list: file not found: " << arg;
+      parse_dynamic_list(ctx, mf);
     } else if (arg == "--push-state") {
       state.push_back({ctx.as_needed, ctx.whole_archive, ctx.is_static,
                        ctx.in_lib});
@@ -302,73 +323,6 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
     Fatal(ctx) << "no input files";
 
   ctx.tg.wait();
-}
-
-template <typename E>
-static void show_stats(Context<E> &ctx) {
-  for (ObjectFile<E> *obj : ctx.objs) {
-    static Counter defined("defined_syms");
-    defined += obj->first_global - 1;
-
-    static Counter undefined("undefined_syms");
-    undefined += obj->symbols.size() - obj->first_global;
-
-    for (std::unique_ptr<InputSection<E>> &sec : obj->sections) {
-      if (!sec || !sec->is_alive)
-        continue;
-
-      static Counter alloc("reloc_alloc");
-      static Counter nonalloc("reloc_nonalloc");
-
-      if (sec->shdr().sh_flags & SHF_ALLOC)
-        alloc += sec->get_rels(ctx).size();
-      else
-        nonalloc += sec->get_rels(ctx).size();
-    }
-
-    static Counter comdats("comdats");
-    comdats += obj->comdat_groups.size();
-
-    static Counter removed_comdats("removed_comdat_mem");
-    for (auto &pair : obj->comdat_groups)
-      if (ComdatGroup *group = pair.first; group->owner != obj->priority)
-        removed_comdats += pair.second.size();
-
-    static Counter num_cies("num_cies");
-    num_cies += obj->cies.size();
-
-    static Counter num_unique_cies("num_unique_cies");
-    for (CieRecord<E> &cie : obj->cies)
-      if (cie.is_leader)
-        num_unique_cies++;
-
-    static Counter num_fdes("num_fdes");
-    num_fdes +=  obj->fdes.size();
-  }
-
-  static Counter num_bytes("total_input_bytes");
-  for (std::unique_ptr<MappedFile<Context<E>>> &mf : ctx.mf_pool)
-    num_bytes += mf->size;
-
-  static Counter num_input_sections("input_sections");
-  for (ObjectFile<E> *file : ctx.objs)
-    num_input_sections += file->sections.size();
-
-  static Counter num_output_chunks("output_chunks", ctx.chunks.size());
-  static Counter num_objs("num_objs", ctx.objs.size());
-  static Counter num_dsos("num_dsos", ctx.dsos.size());
-
-  if constexpr (needs_thunk<E>) {
-    static Counter thunk_bytes("thunk_bytes");
-    for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-      for (std::unique_ptr<RangeExtensionThunk<E>> &thunk : osec->thunks)
-        thunk_bytes += thunk->size();
-  }
-
-  Counter::print();
-
-  for (std::unique_ptr<MergedSection<E>> &sec : ctx.merged_sections)
-    sec->print_stats(ctx);
 }
 
 // Since elf_main is a template, we can't run it without a type parameter.
@@ -440,11 +394,6 @@ int elf_main(int argc, char **argv) {
       Fatal(ctx) << "chdir failed: " << ctx.arg.directory
                  << ": " << errno_string();
 
-  if (ctx.arg.relocatable) {
-    combine_objects(ctx, file_args);
-    return 0;
-  }
-
   // Fork a subprocess unless --no-fork is given.
   std::function<void()> on_complete;
 
@@ -486,7 +435,8 @@ int elf_main(int argc, char **argv) {
   apply_exclude_libs(ctx);
 
   // Create a dummy file containing linker-synthesized symbols.
-  create_internal_file(ctx);
+  if (!ctx.arg.relocatable)
+    create_internal_file(ctx);
 
   // resolve_symbols is 4 things in 1 phase:
   //
@@ -501,7 +451,15 @@ int elf_main(int argc, char **argv) {
   resolve_symbols(ctx);
 
   // Resolve mergeable section pieces to merge them.
-  register_section_pieces(ctx);
+  resolve_section_pieces(ctx);
+
+  // Handle --relocatable. Since the linker's behavior is quite different
+  // from the normal one when the option is given, the logic is implemented
+  // to a separate file.
+  if (ctx.arg.relocatable) {
+    combine_objects(ctx);
+    return 0;
+  }
 
   // Create .bss sections for common symbols.
   convert_common_symbols(ctx);
@@ -541,10 +499,7 @@ int elf_main(int argc, char **argv) {
     ppc64v1_rewrite_opd(ctx);
 
   // Bin input sections into output sections.
-  bin_sections(ctx);
-
-  // Get a list of output sections.
-  append(ctx.chunks, collect_output_sections(ctx));
+  create_output_sections(ctx);
 
   // Add synthetic symbols such as __ehdr_start or __end.
   add_synthetic_symbols(ctx);
@@ -667,23 +622,8 @@ int elf_main(int argc, char **argv) {
   if (ctx.arg.emit_relocs)
     create_reloc_sections(ctx);
 
-  // Update sh_size for each chunk and remove empty ones.
-  for (Chunk<E> *chunk : ctx.chunks)
-    chunk->update_shdr(ctx);
-
-  std::erase_if(ctx.chunks, [](Chunk<E> *chunk) {
-    return chunk->kind() != OUTPUT_SECTION && chunk->shdr.sh_size == 0;
-  });
-
-  // Set section indices.
-  for (i64 i = 0, shndx = 1; i < ctx.chunks.size(); i++)
-    if (ctx.chunks[i]->kind() != HEADER)
-      ctx.chunks[i]->shndx = shndx++;
-
-  // Some types of section header refer other section by index.
-  // Recompute the section header to fill such fields with correct values.
-  for (Chunk<E> *chunk : ctx.chunks)
-    chunk->update_shdr(ctx);
+  // Compute the section header values for all sections.
+  compute_section_headers(ctx);
 
   // Assign offsets to output sections
   i64 filesize = set_osec_offsets(ctx);

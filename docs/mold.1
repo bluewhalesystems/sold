@@ -289,7 +289,7 @@ as
 .Pp
 .It Fl -shuffle-sections
 .It Fl -shuffle-sections Ns = Ns Ar number
-Randomizes the output by shuffleing the order of input sections before \
+Randomizes the output by shuffling the order of input sections before \
 assigning them the offsets in the output file. If
 .Ar number
 is given, it's used as a seed for the random number generator, so that \
@@ -306,7 +306,7 @@ It is possible that the new memory layout happens to perform better.
 .Pp
 By running a benchmark multiple time with shuffling memory layout using
 .Fl -shuffle-sections ,
-you can isolate your progrma's real performance number from the randomness \
+you can isolate your program's real performance number from the randomness \
 caused by memory layout changes.
 .Pp
 .It Fl -stats
@@ -478,6 +478,26 @@ Instead of generating an executable or a shared object file, combine
 input object files to generate another object file that can be used as
 an input to a linker.
 .Pp
+.It Fl -relocatable-merge-sections
+By default,
+.Nm
+doesn't merge input sections by name when merging input object files into a \
+single output object file for
+.Fl r .
+For example,
+.Ar .text.foo
+and
+.Ar .text.bar
+aren't merged for
+.Fl r
+even though they are merged into
+.Ar .text
+according to the default section merging rules.
+.Pp
+This option changes the behavior so that
+.Nm
+merges input sections by name by the default section merging rules.
+.Pp
 .It Fl s , Fl -strip-all
 Omit
 .Li \.symtab
@@ -632,6 +652,11 @@ Same as
 except that it implies
 .Fl -Bsymbolic .
 .Pp
+If
+.Ar file
+does not exist in the current directory, it is searched from library \
+search paths for the sake of compatibility with GNU ld.
+.Pp
 .It Fl -eh-frame-hdr
 .It Fl -no-eh-frame-hdr
 Create
@@ -648,10 +673,6 @@ The
 instructs the linker to leave relocation sections in the output file. \
 Some post-link binary analysis or optimization tools such as LLVM Bolt \
 need them.
-.Pp
-.Nm
-always creates RELA-type relocation sections even if the native \
-ELF format is REL-type so that it is easy to read addends.
 .Pp
 .It Fl -enable-new-dtags
 .It Fl -disable-new-dtags
@@ -824,9 +845,6 @@ to embed metadata regarding a package to each executable file.
 .It Fl -no-pie , -no-pic-executable
 Create a position-independent executable.
 .Pp
-.It Fl -preload
-Preload object files.
-.Pp
 .It Fl -print-gc-sections
 .It Fl -no-print-gc-sections
 Print removed unreferenced sections.
@@ -879,7 +897,7 @@ is a text file
 containing a symbol name on each line.
 .Nm
 discards all local
-symbols as well as global sybmol that are not in
+symbols as well as global symbol that are not in
 .Ar file .
 Note that this option removes symbols only from
 .Dv .symtab
@@ -943,6 +961,10 @@ How to handle undefined symbols.
 .It Fl -version-script Ns = Ns Ar file
 Read version script from
 .Ar file .
+If
+.Ar file
+does not exist in the current directory, it is searched from library search paths \
+for the sake of compatibility with GNU ld.
 .Pp
 .It Fl -warn-common
 .It Fl -no-warn-common

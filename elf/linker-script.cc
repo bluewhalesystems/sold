@@ -251,6 +251,13 @@ MachineType get_script_output_type(Context<E> &ctx, MappedFile<Context<E>> *mf) 
     if (tok[2] == "elf32-i386")
       return MachineType::I386;
   }
+
+  if (tok.size() >= 3 && (tok[0] == "INPUT" || tok[0] == "GROUP") &&
+      tok[1] == "(")
+    if (MappedFile<Context<E>> *mf =
+        MappedFile<Context<E>>::open(ctx, std::string(unquote(tok[2]))))
+      return get_machine_type(ctx, mf);
+
   return MachineType::NONE;
 }
 
@@ -344,10 +351,9 @@ void read_version_script(Context<E> &ctx, std::span<std::string_view> &tok) {
 }
 
 template <typename E>
-void parse_version_script(Context<E> &ctx, std::string path) {
-  current_file<E> = MappedFile<Context<E>>::must_open(ctx, path);
-  std::vector<std::string_view> vec =
-    tokenize(ctx, current_file<E>->get_contents());
+void parse_version_script(Context<E> &ctx, MappedFile<Context<E>> *mf) {
+  current_file<E> = mf;
+  std::vector<std::string_view> vec = tokenize(ctx, mf->get_contents());
   std::span<std::string_view> tok = vec;
   read_version_script(ctx, tok);
   if (!tok.empty())
@@ -386,12 +392,11 @@ void read_dynamic_list_commands(Context<E> &ctx, std::span<std::string_view> &to
 }
 
 template <typename E>
-void parse_dynamic_list(Context<E> &ctx, std::string path) {
-  current_file<E> = MappedFile<Context<E>>::must_open(ctx, path);
-  std::vector<std::string_view> vec =
-    tokenize(ctx, current_file<E>->get_contents());
-
+void parse_dynamic_list(Context<E> &ctx, MappedFile<Context<E>> *mf) {
+  current_file<E> = mf;
+  std::vector<std::string_view> vec = tokenize(ctx, mf->get_contents());
   std::span<std::string_view> tok = vec;
+
   tok = skip(ctx, tok, "{");
   read_dynamic_list_commands(ctx, tok, false);
   tok = skip(ctx, tok, "}");
@@ -405,7 +410,7 @@ using E = MOLD_TARGET;
 
 template void parse_linker_script(Context<E> &, MappedFile<Context<E>> *);
 template MachineType get_script_output_type(Context<E> &, MappedFile<Context<E>> *);
-template void parse_version_script(Context<E> &, std::string);
-template void parse_dynamic_list(Context<E> &, std::string);
+template void parse_version_script(Context<E> &, MappedFile<Context<E>> *);
+template void parse_dynamic_list(Context<E> &, MappedFile<Context<E>> *);
 
 } // namespace mold::elf

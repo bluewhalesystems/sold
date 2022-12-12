@@ -107,7 +107,7 @@ static bool is_reachable(Context<E> &ctx, InputSection<E> &isec,
   // Compute a distance between the relocated place and the symbol
   // and check if they are within reach.
   i64 S = sym.get_addr(ctx, NO_OPD);
-  i64 A = isec.get_addend(rel);
+  i64 A = get_addend(isec, rel);
   i64 P = isec.get_addr() + rel.r_offset;
   i64 val = S + A - P;
   return -max_distance<E> <= val && val < max_distance<E>;
@@ -222,7 +222,7 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
     thunk.offset = offset;
 
     // Scan relocations between B and C to collect symbols that need thunks.
-    tbb::parallel_for_each(&m[b], &m[c], [&](InputSection<E> *isec) {
+    tbb::parallel_for_each(m.begin() + b, m.begin() + c, [&](InputSection<E> *isec) {
       scan_rels(ctx, *isec, thunk);
     });
 
@@ -244,7 +244,7 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
     }
 
     // Scan relocations again to fix symbol offsets in the last thunk.
-    tbb::parallel_for_each(&m[b], &m[c], [&](InputSection<E> *isec) {
+    tbb::parallel_for_each(m.begin() + b, m.begin() + c, [&](InputSection<E> *isec) {
       std::span<Symbol<E> *> syms = isec->file.symbols;
       std::span<const ElfRel<E>> rels = isec->get_rels(ctx);
       std::span<RangeExtensionRef> range_extn = isec->extra.range_extn;

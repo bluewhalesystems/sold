@@ -106,6 +106,8 @@ void EhFrameSection<E>::apply_reloc(Context<E> &ctx, const ElfRel<E> &rel,
   u8 *loc = ctx.buf + this->shdr.sh_offset + offset;
 
   switch (rel.r_type) {
+  case R_NONE:
+    break;
   case R_390_PC32:
     *(ub32 *)loc = val - this->shdr.sh_addr - offset;
     break;
@@ -455,7 +457,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     }
 
     if (sym.is_ifunc())
-      sym.flags |= (NEEDS_GOT | NEEDS_PLT);
+      sym.flags.fetch_or(NEEDS_GOT | NEEDS_PLT, std::memory_order_relaxed);
 
     switch (rel.r_type) {
     case R_390_64:
@@ -491,7 +493,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_390_GOTPC:
     case R_390_GOTPCDBL:
     case R_390_GOTENT:
-      sym.flags |= NEEDS_GOT;
+      sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
       break;
     case R_390_PLT12DBL:
     case R_390_PLT16DBL:
@@ -503,16 +505,16 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_390_PLTOFF32:
     case R_390_PLTOFF64:
       if (sym.is_imported)
-        sym.flags |= NEEDS_PLT;
+        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
       break;
     case R_390_TLS_GOTIE20:
     case R_390_TLS_IEENT:
-      sym.flags |= NEEDS_GOTTP;
+      sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
       break;
     case R_390_TLS_GD32:
     case R_390_TLS_GD64:
       if (!relax_tlsgd(ctx, sym))
-        sym.flags |= NEEDS_TLSGD;
+        sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
       break;
     case R_390_TLS_LDM32:
     case R_390_TLS_LDM64:

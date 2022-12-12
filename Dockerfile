@@ -16,7 +16,7 @@ RUN apt-get update && \
   ./Configure --prefix=/usr/local && \
   make -j$(nproc) && \
   make -j$(nproc) install && \
-  \
   mkdir /cmake && cd /cmake && \
   wget -O- -q https://github.com/Kitware/CMake/releases/download/v3.24.2/cmake-3.24.2.tar.gz | tar --strip-components=1 -xzf - && \
-  ./bootstrap --parallel=$(nproc) && make -j$(nproc) && make -j$(nproc) install
+  ./bootstrap --parallel=$(nproc) && make -j$(nproc) && make -j$(nproc) install && \
+  rm -rf /var/lib/apt/lists/* /cmake /openssl

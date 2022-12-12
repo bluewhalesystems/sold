@@ -78,6 +78,10 @@ void cleanup();
 void install_signal_handler();
 i64 get_default_thread_count();
 
+static u64 combine_hash(u64 a, u64 b) {
+  return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
+}
+
 //
 // Error output
 //
@@ -415,18 +419,19 @@ public:
     i64 retry = 0;
 
     while (retry < MAX_RETRY) {
-      const char *ptr = keys[idx];
+      const char *ptr = keys[idx].load(std::memory_order_acquire);
       if (ptr == marker) {
         pause();
         continue;
       }
 
       if (ptr == nullptr) {
-        if (!keys[idx].compare_exchange_weak(ptr, marker))
+        if (!keys[idx].compare_exchange_weak(ptr, marker,
+                                             std::memory_order_acq_rel))
           continue;
         new (values + idx) T(val);
         key_sizes[idx] = key.size();
-        keys[idx] = key.data();
+        keys[idx].store(key.data(), std::memory_order_release);
         return {values + idx, true};
       }
 

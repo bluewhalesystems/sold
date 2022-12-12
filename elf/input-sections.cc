@@ -20,7 +20,7 @@ bool CieRecord<E>::equals(const CieRecord<E> &other) const {
     if (x[i].r_offset - input_offset != y[i].r_offset - other.input_offset ||
         x[i].r_type != y[i].r_type ||
         file.symbols[x[i].r_sym] != other.file.symbols[y[i].r_sym] ||
-        input_section.get_addend(x[i]) != other.input_section.get_addend(y[i]))
+        get_addend(input_section, x[i]) != get_addend(other.input_section, y[i]))
       return false;
   }
   return true;
@@ -55,9 +55,6 @@ InputSection<E>::InputSection(Context<E> &ctx, ObjectFile<E> &file,
   // addends are in relocations.
   if constexpr (!is_rela<E>)
     uncompress(ctx);
-
-  output_section =
-    OutputSection<E>::get_instance(ctx, name, shdr().sh_type, shdr().sh_flags);
 }
 
 template <typename E>
@@ -131,6 +128,8 @@ template <typename E>
 void InputSection<E>::scan_rel(Context<E> &ctx, Symbol<E> &sym,
                                const ElfRel<E> &rel,
                                const ScanAction table[3][4]) {
+  bool writable = (shdr().sh_flags & SHF_WRITE);
+
   auto error = [&] {
     std::string msg = sym.is_absolute() ? "-fno-PIC" : "-fPIC";
     Error(ctx) << *this << ": " << rel << " relocation at offset 0x"
@@ -139,50 +138,70 @@ void InputSection<E>::scan_rel(Context<E> &ctx, Symbol<E> &sym,
   };
 
   auto check_textrel = [&] {
-    if (this->shdr().sh_flags & SHF_WRITE)
-      return;
-
-    if (ctx.arg.z_text) {
-      error();
-    } else if (ctx.arg.warn_textrel) {
-      Warn(ctx) << *this << ": relocation against symbol `" << sym
-                << "' in read-only section";
+    if (!writable) {
+      if (ctx.arg.z_text) {
+        error();
+      } else if (ctx.arg.warn_textrel) {
+        Warn(ctx) << *this << ": relocation against symbol `" << sym
+                  << "' in read-only section";
+      }
+      ctx.has_textrel = true;
     }
-    ctx.has_textrel = true;
+  };
+
+  auto copyrel = [&] {
+    assert(sym.is_imported);
+    if (sym.esym().st_visibility == STV_PROTECTED) {
+      Error(ctx) << *this
+                 << ": cannot make copy relocation for protected symbol '" << sym
+                 << "', defined in " << *sym.file << "; recompile with -fPIC";
+    }
+    sym.flags |= NEEDS_COPYREL;
+  };
+
+  auto dynrel = [&] {
+    assert(sym.is_imported);
+    check_textrel();
+    this->file.num_dynrel++;
   };
 
   switch (get_rel_action(ctx, sym, table)) {
   case NONE:
-    return;
+    break;
   case ERROR:
     error();
-    return;
+    break;
   case COPYREL:
-    if (!ctx.arg.z_copyreloc) {
+    if (!ctx.arg.z_copyreloc)
       error();
-    } else if (sym.esym().st_visibility == STV_PROTECTED) {
-      Error(ctx) << *this << ": cannot make copy relocation for protected symbol '"
-                 << sym << "', defined in " << *sym.file
-                 << "; recompile with -fPIC";
-    }
-    sym.flags |= NEEDS_COPYREL;
-    return;
+    copyrel();
+    break;
+  case DYN_COPYREL:
+    if (writable || !ctx.arg.z_copyreloc)
+      dynrel();
+    else
+      copyrel();
+    break;
   case PLT:
     sym.flags |= NEEDS_PLT;
-    return;
+    break;
   case CPLT:
     sym.flags |= NEEDS_CPLT;
-    return;
+    break;
+  case DYN_CPLT:
+    if (writable)
+      dynrel();
+    else
+      sym.flags |= NEEDS_CPLT;
+    break;
   case DYNREL:
-    assert(sym.is_imported);
-    check_textrel();
-    this->file.num_dynrel++;
-    return;
+    dynrel();
+    break;
   case BASEREL:
     check_textrel();
     if (!this->is_relr_reloc(ctx, rel))
       this->file.num_dynrel++;
-    return;
+    break;
   default:
     unreachable();
   }
@@ -194,6 +213,14 @@ void InputSection<E>::apply_dyn_absrel(Context<E> &ctx, Symbol<E> &sym,
                                        u64 S, i64 A, u64 P,
                                        ElfRel<E> *&dynrel,
                                        const ScanAction table[3][4]) {
+  bool writable = (shdr().sh_flags & SHF_WRITE);
+
+  auto apply_dynrel = [&] {
+    *dynrel++ = ElfRel<E>(P, E::R_ABS, sym.get_dynsym_idx(ctx), A);
+    if (ctx.arg.apply_dynamic_relocs)
+      *(Word<E> *)loc = A;
+  };
+
   switch (get_rel_action(ctx, sym, table)) {
   case COPYREL:
   case CPLT:
@@ -209,10 +236,20 @@ void InputSection<E>::apply_dyn_absrel(Context<E> &ctx, Symbol<E> &sym,
         *(Word<E> *)loc = S + A;
     }
     break;
+  case DYN_COPYREL:
+    if (writable || !ctx.arg.z_copyreloc)
+      apply_dynrel();
+    else
+      *(Word<E> *)loc = S + A;
+    break;
+  case DYN_CPLT:
+    if (writable)
+      apply_dynrel();
+    else
+      *(Word<E> *)loc = S + A;
+    break;
   case DYNREL:
-    *dynrel++ = ElfRel<E>(P, E::R_ABS, sym.get_dynsym_idx(ctx), A);
-    if (ctx.arg.apply_dynamic_relocs)
-      *(Word<E> *)loc = A;
+    apply_dynrel();
     break;
   default:
     unreachable();
@@ -232,10 +269,12 @@ void InputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   }
 
   // Apply relocations
-  if (shdr().sh_flags & SHF_ALLOC)
-    apply_reloc_alloc(ctx, buf);
-  else
-    apply_reloc_nonalloc(ctx, buf);
+  if (!ctx.arg.relocatable) {
+    if (shdr().sh_flags & SHF_ALLOC)
+      apply_reloc_alloc(ctx, buf);
+    else
+      apply_reloc_nonalloc(ctx, buf);
+  }
 }
 
 // Get the name of a function containin a given offset.

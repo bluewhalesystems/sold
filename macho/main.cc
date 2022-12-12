@@ -13,6 +13,7 @@
 #include <tbb/concurrent_vector.h>
 #include <tbb/global_control.h>
 #include <tbb/parallel_for_each.h>
+#include <tbb/parallel_sort.h>
 
 #ifndef _WIN32
 # include <sys/mman.h>
@@ -283,6 +284,15 @@ static bool compare_chunks(const Chunk<E> *a, const Chunk<E> *b) {
 }
 
 template <typename E>
+static Chunk<E> *find_section(Context<E> &ctx, std::string_view segname,
+                              std::string_view sectname) {
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (chunk->hdr.match(segname, sectname))
+      return chunk;
+  return nullptr;
+}
+
+template <typename E>
 static void claim_unresolved_symbols(Context<E> &ctx) {
   Timer t(ctx, "claim_unresolved_symbols");
 
@@ -293,6 +303,9 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
       sym->is_weak = true;
     }
   }
+
+  std::vector<Symbol<E> *> syms;
+  std::mutex mu;
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (i64 i = 0; i < file->mach_syms.size(); i++) {
@@ -313,18 +326,42 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
           sym.value = 0;
           sym.is_common = false;
         }
+        continue;
+      }
+
+      if (!sym.file && sym.name.starts_with("_objc_msgSend$")) {
+        sym.file = ctx.internal_obj;
+        std::scoped_lock lock(mu);
+        syms.push_back(&sym);
       }
     }
   });
-}
 
-template <typename E>
-static Chunk<E> *find_section(Context<E> &ctx, std::string_view segname,
-                              std::string_view sectname) {
-  for (Chunk<E> *chunk : ctx.chunks)
-    if (chunk->hdr.match(segname, sectname))
-      return chunk;
-  return nullptr;
+  // We synthesize `_objc_msgSend$foo` in the `__objc_stubs` section
+  // if such symbol is missing.
+  if (!syms.empty()) {
+    if (find_section(ctx, "__TEXT", "__objc_selrefs"))
+      Fatal(ctx) << "__objc_selrefs already exists";
+
+    ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
+    ctx.objc_selrefs.reset(new ObjcSelrefsSection<E>(ctx));
+    ctx.objc_methname.reset(new ObjcMethnameSection<E>(ctx));
+
+    tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
+      return a->name < b->name;
+    });
+
+    for (Symbol<E> *sym : syms) {
+      ctx.internal_obj->syms.push_back(sym);
+      ctx.objc_stubs->add(ctx, sym);
+    }
+
+    Symbol<E> *sym = get_symbol(ctx, "_objc_msgSend");
+    if (!sym->file)
+      Error(ctx) << "undefined symbol: _objc_msgSend";
+    if (sym->is_imported)
+      sym->flags |= NEEDS_GOT;
+  }
 }
 
 template <typename E>
@@ -552,7 +589,7 @@ static i64 assign_offsets(Context<E> &ctx) {
 
 // An address of a symbol of type S_THREAD_LOCAL_VARIABLES is computed
 // as a relative address to the beginning of the first thread-local
-// section. This function finds the beginnning address.
+// section. This function finds the beginning address.
 template <typename E>
 static u64 get_tls_begin(Context<E> &ctx) {
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
@@ -592,6 +629,8 @@ static void fix_synthetic_symbol_values(Context<E> &ctx) {
     return nullptr;
   };
 
+  i64 objc_stubs_offset = 0;
+
   for (Symbol<E> *sym : ctx.internal_obj->syms) {
     std::string_view name = sym->name;
 
@@ -620,6 +659,13 @@ static void fix_synthetic_symbol_values(Context<E> &ctx) {
       sym->value = ctx.text->hdr.addr;
       if (MachSection *hdr = find_section(name))
         sym->value = hdr->addr + hdr->size;
+      continue;
+    }
+
+    if (name.starts_with("_objc_msgSend$")) {
+      sym->value = ctx.objc_stubs->hdr.addr + objc_stubs_offset;
+      objc_stubs_offset += ObjcStubsSection<E>::ENTRY_SIZE;
+      continue;
     }
   }
 }

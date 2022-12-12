@@ -2,6 +2,7 @@
 #include "../sha.h"
 
 #include <cctype>
+#include <set>
 #include <shared_mutex>
 #include <span>
 #include <tbb/parallel_for_each.h>
@@ -36,19 +37,6 @@ static u32 djb_hash(std::string_view name) {
 }
 
 template <typename E>
-u64 get_entry_addr(Context<E> &ctx) {
-  if (!ctx.arg.entry.empty())
-    if (Symbol<E> *sym = get_symbol(ctx, ctx.arg.entry);
-        sym->file && !sym->file->is_dso)
-      return sym->get_addr(ctx);
-
-  for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-    if (osec->name == ".text")
-      return osec->shdr.sh_addr;
-  return 0;
-}
-
-template <typename E>
 u64 get_eflags(Context<E> &ctx) {
   if constexpr (std::is_same_v<E, ARM32>)
     return EF_ARM_EABI_VER5;
@@ -77,38 +65,74 @@ void OutputEhdr<E>::copy_buf(Context<E> &ctx) {
   ElfEhdr<E> &hdr = *(ElfEhdr<E> *)(ctx.buf + this->shdr.sh_offset);
   memset(&hdr, 0, sizeof(hdr));
 
+  auto get_entry_addr = [&]() -> u64 {
+    if (ctx.arg.relocatable)
+      return 0;
+
+    if (!ctx.arg.entry.empty())
+      if (Symbol<E> *sym = get_symbol(ctx, ctx.arg.entry);
+          sym->file && !sym->file->is_dso)
+        return sym->get_addr(ctx);
+
+    for (Chunk<E> *chunk : ctx.chunks)
+      if (chunk->name == ".text")
+        return chunk->shdr.sh_addr;
+    return 0;
+  };
+
   memcpy(&hdr.e_ident, "\177ELF", 4);
   hdr.e_ident[EI_CLASS] = E::is_64 ? ELFCLASS64 : ELFCLASS32;
   hdr.e_ident[EI_DATA] = E::is_le ? ELFDATA2LSB : ELFDATA2MSB;
   hdr.e_ident[EI_VERSION] = EV_CURRENT;
-  hdr.e_type = ctx.arg.pic ? ET_DYN : ET_EXEC;
   hdr.e_machine = E::e_machine;
   hdr.e_version = EV_CURRENT;
-  hdr.e_entry = get_entry_addr(ctx);
-  hdr.e_phoff = ctx.phdr->shdr.sh_offset;
-  hdr.e_shoff = ctx.shdr->shdr.sh_offset;
+  hdr.e_entry = get_entry_addr();
   hdr.e_flags = get_eflags(ctx);
   hdr.e_ehsize = sizeof(ElfEhdr<E>);
-  hdr.e_phentsize = sizeof(ElfPhdr<E>);
-  hdr.e_phnum = ctx.phdr->shdr.sh_size / sizeof(ElfPhdr<E>);
-  hdr.e_shentsize = sizeof(ElfShdr<E>);
-  hdr.e_shnum = ctx.shdr->shdr.sh_size / sizeof(ElfShdr<E>);
-  hdr.e_shstrndx = ctx.shstrtab->shndx;
-}
 
-template <typename E>
-void OutputShdr<E>::update_shdr(Context<E> &ctx) {
-  i64 n = 0;
-  for (Chunk<E> *chunk : ctx.chunks)
-    if (chunk->shndx)
-      n = chunk->shndx;
-  this->shdr.sh_size = (n + 1) * sizeof(ElfShdr<E>);
+  // If e_shstrndx is too large, a dummy value is set to e_shstrndx.
+  // The real value is stored to the zero'th section's sh_link field.
+  if (ctx.shstrtab->shndx < SHN_LORESERVE)
+    hdr.e_shstrndx = ctx.shstrtab->shndx;
+  else
+    hdr.e_shstrndx = SHN_XINDEX;
+
+  if (ctx.arg.relocatable)
+    hdr.e_type = ET_REL;
+  else if (ctx.arg.pic)
+    hdr.e_type = ET_DYN;
+  else
+    hdr.e_type = ET_EXEC;
+
+  if (ctx.phdr) {
+    hdr.e_phoff = ctx.phdr->shdr.sh_offset;
+    hdr.e_phentsize = sizeof(ElfPhdr<E>);
+    hdr.e_phnum = ctx.phdr->shdr.sh_size / sizeof(ElfPhdr<E>);
+  }
+
+  if (ctx.shdr) {
+    hdr.e_shoff = ctx.shdr->shdr.sh_offset;
+    hdr.e_shentsize = sizeof(ElfShdr<E>);
+
+    // Since e_shnum is a 16-bit integer field, we can't store a very
+    // large value there. If it is >65535, the real value is stored to
+    // the zero'th section's sh_size field.
+    i64 shnum = ctx.shdr->shdr.sh_size / sizeof(ElfShdr<E>);
+    hdr.e_shnum = (shnum <= UINT16_MAX) ? shnum : 0;
+  }
 }
 
 template <typename E>
 void OutputShdr<E>::copy_buf(Context<E> &ctx) {
   ElfShdr<E> *hdr = (ElfShdr<E> *)(ctx.buf + this->shdr.sh_offset);
-  hdr[0] = {};
+  memset(hdr, 0, this->shdr.sh_size);
+
+  i64 shnum = ctx.shdr->shdr.sh_size / sizeof(ElfShdr<E>);
+  if (UINT16_MAX < shnum)
+    hdr->sh_size = shnum;
+
+  if (SHN_LORESERVE <= ctx.shstrtab->shndx)
+    hdr->sh_link = ctx.shstrtab->shndx;
 
   for (Chunk<E> *chunk : ctx.chunks)
     if (chunk->shndx)
@@ -524,8 +548,9 @@ void RelrDynSection<E>::update_shdr(Context<E> &ctx) {
   this->shdr.sh_link = ctx.dynsym->shndx;
 
   i64 n = ctx.got->relr.size();
-  for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-    n += osec->relr.size();
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (OutputSection<E> *osec = chunk->to_osec())
+      n += osec->relr.size();
   this->shdr.sh_size = n * sizeof(Word<E>);
 }
 
@@ -536,9 +561,10 @@ void RelrDynSection<E>::copy_buf(Context<E> &ctx) {
   for (u64 val : ctx.got->relr)
     *buf++ = (val & 1) ? val : (ctx.got->shdr.sh_addr + val);
 
-  for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-    for (u64 val : osec->relr)
-      *buf++ = (val & 1) ? val : (osec->shdr.sh_addr + val);
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (OutputSection<E> *osec = chunk->to_osec())
+      for (u64 val : osec->relr)
+        *buf++ = (val & 1) ? val : (osec->shdr.sh_addr + val);
 }
 
 template <typename E>
@@ -890,106 +916,6 @@ void DynamicSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template <typename E>
-static std::string_view
-get_output_name(Context<E> &ctx, std::string_view name, u64 flags) {
-  if (ctx.arg.unique && ctx.arg.unique->match(name))
-    return name;
-
-  if ((name == ".rodata" || name.starts_with(".rodata.")) && (flags & SHF_MERGE))
-    return (flags & SHF_STRINGS) ? ".rodata.str" : ".rodata.cst";
-  if (name.starts_with(".ARM.exidx"))
-    return ".ARM.exidx";
-  if (name.starts_with(".ARM.extab"))
-    return ".ARM.extab";
-
-  if (ctx.arg.z_keep_text_section_prefix) {
-    static std::string_view prefixes[] = {
-      ".text.hot.", ".text.unknown.", ".text.unlikely.", ".text.startup.",
-      ".text.exit."
-    };
-
-    for (std::string_view prefix : prefixes) {
-      std::string_view stem = prefix.substr(0, prefix.size() - 1);
-      if (name == stem || name.starts_with(prefix))
-        return stem;
-    }
-  }
-
-  static std::string_view prefixes[] = {
-    ".text.", ".data.rel.ro.", ".data.", ".rodata.", ".bss.rel.ro.", ".bss.",
-    ".init_array.", ".fini_array.", ".tbss.", ".tdata.", ".gcc_except_table.",
-    ".ctors.", ".dtors.", ".gnu.warning.",
-  };
-
-  for (std::string_view prefix : prefixes) {
-    std::string_view stem = prefix.substr(0, prefix.size() - 1);
-    if (name == stem || name.starts_with(prefix))
-      return stem;
-  }
-
-  return name;
-}
-
-template <typename E>
-static u64 canonicalize_type(std::string_view name, u64 type) {
-  if (type == SHT_PROGBITS) {
-    if (name == ".init_array" || name.starts_with(".init_array."))
-      return SHT_INIT_ARRAY;
-    if (name == ".fini_array" || name.starts_with(".fini_array."))
-      return SHT_FINI_ARRAY;
-  }
-
-  if constexpr (std::is_same_v<E, X86_64>)
-    if (type == SHT_X86_64_UNWIND)
-      return SHT_PROGBITS;
-
-  return type;
-}
-
-template <typename E>
-OutputSection<E> *
-OutputSection<E>::get_instance(Context<E> &ctx, std::string_view name,
-                               u64 type, u64 flags) {
-  name = get_output_name(ctx, name, flags);
-  type = canonicalize_type<E>(name, type);
-  flags = flags & ~(u64)SHF_GROUP & ~(u64)SHF_COMPRESSED & ~(u64)SHF_LINK_ORDER &
-          ~(u64)SHF_GNU_RETAIN;
-
-  // .init_array is usually writable. We don't want to create multiple
-  // .init_array output sections, so make it always writable.
-  // So is .fini_array.
-  if (type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY)
-    flags |= SHF_WRITE;
-
-  auto find = [&]() -> OutputSection<E> * {
-    for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-      if (name == osec->name && type == osec->shdr.sh_type &&
-          flags == osec->shdr.sh_flags)
-        return osec.get();
-    return nullptr;
-  };
-
-  static std::shared_mutex mu;
-
-  // Search for an exiting output section.
-  {
-    std::shared_lock lock(mu);
-    if (OutputSection<E> *osec = find())
-      return osec;
-  }
-
-  // Create a new output section.
-  std::unique_lock lock(mu);
-  if (OutputSection<E> *osec = find())
-    return osec;
-
-  OutputSection<E> *osec = new OutputSection(name, type, flags,
-                                             ctx.output_sections.size());
-  ctx.output_sections.emplace_back(osec);
-  return osec;
-}
-
-template <typename E>
 void OutputSection<E>::copy_buf(Context<E> &ctx) {
   if (this->shdr.sh_type != SHT_NOBITS)
     write_to(ctx, ctx.buf + this->shdr.sh_offset);
@@ -1112,7 +1038,7 @@ void OutputSection<E>::construct_relr(Context<E> &ctx) {
 // Compute spaces needed for thunk symbols
 template <typename E>
 void OutputSection<E>::compute_symtab_size(Context<E> &ctx) {
-  if (ctx.arg.strip_all || ctx.arg.retain_symbols_file)
+  if (ctx.arg.strip_all || ctx.arg.retain_symbols_file || ctx.arg.relocatable)
     return;
 
   if constexpr (needs_thunk<E>) {
@@ -1247,7 +1173,7 @@ i64 GotSection<E>::get_reldyn_size(Context<E> &ctx) const {
 // .got is a linker-synthesized constant pool whose entry is of pointer
 // size. If we know a correct value for an entry, we'll just set that value
 // to the entry. Otherwise, we'll create a dynamic relocation and let the
-// dynamic linker to fill the entry at laod-time.
+// dynamic linker to fill the entry at load-time.
 //
 // Most GOT entries contain addresses of global variable. If a global
 // variable is an imported symbol, we don't know its address until runtime.
@@ -1632,7 +1558,8 @@ void RelPltSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template<typename E>
-ElfSym<E> to_output_esym(Context<E> &ctx, Symbol<E> &sym, u32 st_name) {
+ElfSym<E> to_output_esym(Context<E> &ctx, Symbol<E> &sym, u32 st_name,
+                         U32<E> *shn_xindex) {
   ElfSym<E> esym;
   memset(&esym, 0, sizeof(esym));
 
@@ -1640,7 +1567,7 @@ ElfSym<E> to_output_esym(Context<E> &ctx, Symbol<E> &sym, u32 st_name) {
   esym.st_type = sym.esym().st_type;
   esym.st_size = sym.esym().st_size;
 
-  if (sym.is_local())
+  if (sym.is_local(ctx))
     esym.st_bind = STB_LOCAL;
   else if (sym.is_weak)
     esym.st_bind = STB_WEAK;
@@ -1648,6 +1575,9 @@ ElfSym<E> to_output_esym(Context<E> &ctx, Symbol<E> &sym, u32 st_name) {
     esym.st_bind = STB_GLOBAL;
   else
     esym.st_bind = sym.esym().st_bind;
+
+  if constexpr (requires { esym.ppc_local_entry; })
+    esym.ppc_local_entry = sym.esym().ppc_local_entry;
 
   auto get_st_shndx = [&](Symbol<E> &sym) -> u32 {
     if (SectionFragment<E> *frag = sym.get_frag())
@@ -1668,34 +1598,50 @@ ElfSym<E> to_output_esym(Context<E> &ctx, Symbol<E> &sym, u32 st_name) {
     return SHN_UNDEF;
   };
 
+  u32 shndx = 0;
   if (sym.has_copyrel) {
-    esym.st_shndx =
-      sym.copyrel_readonly ? ctx.copyrel_relro->shndx : ctx.copyrel->shndx;
+    shndx = sym.copyrel_readonly ? ctx.copyrel_relro->shndx : ctx.copyrel->shndx;
     esym.st_value = sym.get_addr(ctx);
   } else if (sym.file->is_dso || sym.esym().is_undef()) {
-    esym.st_shndx = SHN_UNDEF;
+    shndx = SHN_UNDEF;
     if (sym.is_canonical)
       esym.st_value = sym.get_plt_addr(ctx);
   } else if (Chunk<E> *osec = sym.get_output_section()) {
     // Linker-synthesized symbols
-    esym.st_shndx = osec->shndx;
+    shndx = osec->shndx;
     esym.st_value = sym.get_addr(ctx);
   } else if (SectionFragment<E> *frag = sym.get_frag()) {
     // Section fragment
-    esym.st_shndx = frag->output_section.shndx;
+    shndx = frag->output_section.shndx;
     esym.st_value = sym.get_addr(ctx);
   } else if (!sym.get_input_section()) {
     // Absolute symbol
-    esym.st_shndx = SHN_ABS;
+    shndx = SHN_ABS;
     esym.st_value = sym.get_addr(ctx);
   } else if (sym.get_type() == STT_TLS) {
-    esym.st_shndx = get_st_shndx(sym);
+    shndx = get_st_shndx(sym);
     esym.st_value = sym.get_addr(ctx) - ctx.tls_begin;
   } else {
+    shndx = get_st_shndx(sym);
     esym.st_visibility = sym.visibility;
-    esym.st_shndx = get_st_shndx(sym);
     esym.st_value = sym.get_addr(ctx, NO_PLT);
   }
+
+  // Symbol's st_shndx is only 16 bits wide, so we can't store a large
+  // section index there. If the total number of sections is equal to
+  // or greater than SHN_LORESERVE (= 65280), the real index is stored
+  // to a SHT_SYMTAB_SHNDX section which contains a parallel array of
+  // the symbol table.
+  if (shn_xindex) {
+    *shn_xindex = shndx;
+    esym.st_shndx = SHN_XINDEX;
+  } else {
+    if (shndx >= SHN_LORESERVE && shndx != SHN_ABS && shndx != SHN_COMMON)
+      Fatal(ctx) << sym << ": internal error: output symbol index too large: "
+                 << shndx;
+    esym.st_shndx = shndx;
+  }
+
   return esym;
 }
 
@@ -1716,20 +1662,14 @@ void DynsymSection<E>::finalize(Context<E> &ctx) {
   if (symbols.empty())
     return;
 
-  // We need a stable sort for build reproducibility, but parallel_sort
-  // isn't stable, so we use this struct to make it stable.
-  struct T {
-    Symbol<E> *sym = nullptr;
-    u32 hash = 0;
-    i32 idx = 0;
-  };
-
   // Sort symbols. In any symtab, local symbols must precede global symbols.
+  auto first_global = std::stable_partition(symbols.begin() + 1, symbols.end(),
+                                            [&](Symbol<E> *sym) {
+    return sym->is_local(ctx);
+  });
+
   // We also place undefined symbols before defined symbols for .gnu.hash.
   // Defined symbols are sorted by their hashes for .gnu.hash.
-  std::vector<T> vec(symbols.size());
-  i64 num_buckets = 0;
-
   if (ctx.gnu_hash) {
     // Count the number of exported symbols to compute the size of .gnu.hash.
     i64 num_exported = 0;
@@ -1737,36 +1677,37 @@ void DynsymSection<E>::finalize(Context<E> &ctx) {
       if (symbols[i]->is_exported)
         num_exported++;
 
-    num_buckets = num_exported / ctx.gnu_hash->LOAD_FACTOR + 1;
+    u32 num_buckets = num_exported / ctx.gnu_hash->LOAD_FACTOR + 1;
     ctx.gnu_hash->num_buckets = num_buckets;
+
+    tbb::parallel_for((i64)(first_global - symbols.begin()), (i64)symbols.size(),
+                      [&](i64 i) {
+      Symbol<E> &sym = *symbols[i];
+      sym.set_dynsym_idx(ctx, i);
+      sym.set_djb_hash(ctx, djb_hash(sym.name()));
+    });
+
+    tbb::parallel_sort(first_global, symbols.end(),
+                       [&](Symbol<E> *a, Symbol<E> *b) {
+      if (a->is_exported != b->is_exported)
+        return b->is_exported;
+
+      u32 h1 = a->get_djb_hash(ctx) % num_buckets;
+      u32 h2 = b->get_djb_hash(ctx) % num_buckets;
+      return std::tuple(h1, a->get_dynsym_idx(ctx)) <
+             std::tuple(h2, b->get_dynsym_idx(ctx));
+    });
   }
 
-  tbb::parallel_for((i64)1, (i64)symbols.size(), [&](i64 i) {
-    Symbol<E> *sym = symbols[i];
-    vec[i].sym = sym;
-    if (ctx.gnu_hash && sym->is_exported)
-      vec[i].hash = djb_hash(sym->name()) % num_buckets;
-    vec[i].idx = i;
-  });
-
-  tbb::parallel_sort(vec.begin() + 1, vec.end(), [&](const T &a, const T &b) {
-    return std::tuple(!a.sym->is_local(), (bool)a.sym->is_exported, a.hash, a.idx) <
-           std::tuple(!b.sym->is_local(), (bool)b.sym->is_exported, b.hash, b.idx);
-  });
-
+  // Compute .dynstr size
   ctx.dynstr->dynsym_offset = ctx.dynstr->shdr.sh_size;
 
   for (i64 i = 1; i < symbols.size(); i++) {
-    symbols[i] = vec[i].sym;
     symbols[i]->set_dynsym_idx(ctx, i);
     ctx.dynstr->shdr.sh_size += symbols[i]->name().size() + 1;
   }
 
   // ELF's symbol table sh_info holds the offset of the first global symbol.
-  auto first_global =
-    std::partition_point(symbols.begin() + 1, symbols.end(), [](Symbol<E> *sym) {
-      return sym->is_local();
-    });
   this->shdr.sh_info = first_global - symbols.begin();
 }
 
@@ -1787,7 +1728,7 @@ void DynsymSection<E>::copy_buf(Context<E> &ctx) {
     ElfSym<E> &esym =
       *(ElfSym<E> *)(base + sym.get_dynsym_idx(ctx) * sizeof(ElfSym<E>));
 
-    esym = to_output_esym(ctx, sym, name_offset);
+    esym = to_output_esym(ctx, sym, name_offset, nullptr);
     name_offset += sym.name().size() + 1;
     assert(esym.st_bind != STB_LOCAL || i < this->shdr.sh_info);
   }
@@ -1809,18 +1750,22 @@ void HashSection<E>::copy_buf(Context<E> &ctx) {
   u8 *base = ctx.buf + this->shdr.sh_offset;
   memset(base, 0, this->shdr.sh_size);
 
-  i64 num_slots = ctx.dynsym->symbols.size();
+  std::span<Symbol<E> *> syms = ctx.dynsym->symbols;
   U32<E> *hdr = (U32<E> *)base;
   U32<E> *buckets = (U32<E> *)(base + 8);
-  U32<E> *chains = buckets + num_slots;
+  U32<E> *chains = buckets + syms.size();
 
-  hdr[0] = hdr[1] = num_slots;
+  hdr[0] = hdr[1] = syms.size();
 
-  for (i64 i = 1; i < ctx.dynsym->symbols.size(); i++) {
-    Symbol<E> *sym = ctx.dynsym->symbols[i];
-    i64 idx = elf_hash(sym->name()) % num_slots;
-    chains[sym->get_dynsym_idx(ctx)] = buckets[idx];
-    buckets[idx] = sym->get_dynsym_idx(ctx);
+  std::vector<u32> hashes(syms.size());
+  tbb::parallel_for((i64)1, (i64)syms.size(), [&](i64 i) {
+    hashes[i] = elf_hash(syms[i]->name()) % syms.size();
+  });
+
+  for (i64 i = 1; i < syms.size(); i++) {
+    i64 h = hashes[i];
+    chains[syms[i]->get_dynsym_idx(ctx)] = buckets[h];
+    buckets[h] = syms[i]->get_dynsym_idx(ctx);
   }
 }
 
@@ -1860,6 +1805,7 @@ void GnuHashSection<E>::copy_buf(Context<E> &ctx) {
   memset(base, 0, this->shdr.sh_size);
 
   std::span<Symbol<E> *> syms = get_exported_symbols(ctx);
+  std::vector<u32> indices(syms.size());
   i64 exported_offset = ctx.dynsym->symbols.size() - syms.size();
 
   *(U32<E> *)base = num_buckets;
@@ -1867,40 +1813,51 @@ void GnuHashSection<E>::copy_buf(Context<E> &ctx) {
   *(U32<E> *)(base + 8) = num_bloom;
   *(U32<E> *)(base + 12) = BLOOM_SHIFT;
 
-  std::vector<u32> hashes(syms.size());
-  for (i64 i = 0; i < syms.size(); i++)
-    hashes[i] = djb_hash(syms[i]->name());
-
   // Write a bloom filter
   Word<E> *bloom = (Word<E> *)(base + HEADER_SIZE);
-  for (i64 hash : hashes) {
+
+  for (i64 i = 0; i < syms.size(); i++) {
     constexpr i64 word_bits = sizeof(Word<E>) * 8;
-    i64 idx = (hash / word_bits) % num_bloom;
-    bloom[idx] |= 1LL << (hash % word_bits);
-    bloom[idx] |= 1LL << ((hash >> BLOOM_SHIFT) % word_bits);
+
+    i64 h = syms[i]->get_djb_hash(ctx);
+    indices[i] = h % num_buckets;
+
+    i64 idx = (h / word_bits) % num_bloom;
+    bloom[idx] |= 1LL << (h % word_bits);
+    bloom[idx] |= 1LL << ((h >> BLOOM_SHIFT) % word_bits);
   }
 
   // Write hash bucket indices
   U32<E> *buckets = (U32<E> *)(bloom + num_bloom);
-  for (i64 i = 0; i < hashes.size(); i++) {
-    i64 idx = hashes[i] % num_buckets;
-    if (!buckets[idx])
-      buckets[idx] = i + exported_offset;
-  }
+
+  for (i64 i = 0; i < syms.size(); i++)
+    if (!buckets[indices[i]])
+      buckets[indices[i]] = i + exported_offset;
 
   // Write a hash table
   U32<E> *table = buckets + num_buckets;
-  for (i64 i = 0; i < syms.size(); i++) {
-    bool is_last = false;
-    if (i == syms.size() - 1 ||
-        (hashes[i] % num_buckets) != (hashes[i + 1] % num_buckets))
-      is_last = true;
 
-    if (is_last)
-      table[i] = hashes[i] | 1;
+  for (i64 i = 0; i < syms.size(); i++) {
+    // The last entry in a chain must be terminated with an entry with
+    // least-significant bit 1.
+    u32 h = syms[i]->get_djb_hash(ctx);
+    if (i == syms.size() - 1 || indices[i] != indices[i + 1])
+      table[i] = h | 1;
     else
-      table[i] = hashes[i] & ~1;
+      table[i] = h & ~1;
   }
+}
+
+template <typename E>
+std::string_view
+get_merged_output_name(Context<E> &ctx, std::string_view name, u64 flags) {
+  if (ctx.arg.relocatable && !ctx.arg.relocatable_merge_sections)
+    return name;
+  if (ctx.arg.unique && ctx.arg.unique->match(name))
+    return name;
+  if (name == ".rodata" || name.starts_with(".rodata."))
+    return (flags & SHF_STRINGS) ? ".rodata.str" : ".rodata.cst";
+  return name;
 }
 
 template <typename E>
@@ -1914,9 +1871,8 @@ template <typename E>
 MergedSection<E> *
 MergedSection<E>::get_instance(Context<E> &ctx, std::string_view name,
                                u64 type, u64 flags) {
-  name = get_output_name(ctx, name, flags);
-  flags = flags & ~(u64)SHF_GROUP & ~(u64)SHF_MERGE & ~(u64)SHF_STRINGS &
-          ~(u64)SHF_COMPRESSED;
+  name = get_merged_output_name(ctx, name, flags);
+  flags = flags & ~(u64)SHF_GROUP & ~(u64)SHF_COMPRESSED;
 
   auto find = [&]() -> MergedSection * {
     for (std::unique_ptr<MergedSection<E>> &osec : ctx.merged_sections)
@@ -1985,8 +1941,8 @@ void MergedSection<E>::assign_offsets(Context<E> &ctx) {
     // Sort fragments to make output deterministic.
     tbb::parallel_sort(fragments.begin(), fragments.end(),
                        [](const KeyVal &a, const KeyVal &b) {
-      return std::tuple{a.val->p2align.load(), a.key.size(), a.key} <
-             std::tuple{b.val->p2align.load(), b.key.size(), b.key};
+      return std::tuple{(u32)a.val->p2align, a.key.size(), a.key} <
+             std::tuple{(u32)b.val->p2align, b.key.size(), b.key};
     });
 
     // Assign offsets.
@@ -2060,6 +2016,14 @@ template <typename E>
 void EhFrameSection<E>::construct(Context<E> &ctx) {
   Timer t(ctx, "eh_frame");
 
+  // If .eh_frame is missing in all input files, we don't want to
+  // create an output .eh_frame section.
+  if (std::all_of(ctx.objs.begin(), ctx.objs.end(),
+                  [](ObjectFile<E> *file) { return file->cies.empty(); })) {
+    this->shdr.sh_size = 0;
+    return;
+  }
+
   // Remove dead FDEs and assign them offsets within their corresponding
   // CIE group.
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
@@ -2121,7 +2085,7 @@ void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
   };
 
   HdrEntry *eh_hdr_begin = nullptr;
-  if (ctx.arg.eh_frame_hdr)
+  if (ctx.eh_frame_hdr)
     eh_hdr_begin = (HdrEntry *)(ctx.buf + ctx.eh_frame_hdr->shdr.sh_offset +
                    EhFrameHdrSection<E>::HEADER_SIZE);
 
@@ -2134,14 +2098,16 @@ void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
       std::string_view contents = cie.get_contents();
       memcpy(base + cie.output_offset, contents.data(), contents.size());
 
+      if (ctx.arg.relocatable)
+        continue;
+
       for (const ElfRel<E> &rel : cie.get_rels()) {
-        if (rel.r_type == R_NONE)
-          continue;
         assert(rel.r_offset - cie.input_offset < contents.size());
+
+        Symbol<E> &sym = *file->symbols[rel.r_sym];
         u64 loc = cie.output_offset + rel.r_offset - cie.input_offset;
-        u64 val = file->symbols[rel.r_sym]->get_addr(ctx);
-        u64 addend = cie.input_section.get_addend(rel);
-        apply_reloc(ctx, rel, loc, val + addend);
+        u64 val = sym.get_addr(ctx) + get_addend(cie.input_section, rel);
+        apply_reloc(ctx, rel, loc, val);
       }
     }
 
@@ -2155,23 +2121,24 @@ void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
 
       CieRecord<E> &cie = file->cies[fde.cie_idx];
       *(U32<E> *)(base + offset + 4) = offset + 4 - cie.output_offset;
+
+      if (ctx.arg.relocatable)
+        continue;
+
       bool is_first = true;
-
       for (const ElfRel<E> &rel : fde.get_rels(*file)) {
-        if (rel.r_type == R_NONE)
-          continue;
-
         assert(rel.r_offset - fde.input_offset < contents.size());
+
+        Symbol<E> &sym = *file->symbols[rel.r_sym];
         u64 loc = offset + rel.r_offset - fde.input_offset;
-        u64 val = file->symbols[rel.r_sym]->get_addr(ctx);
-        u64 addend = cie.input_section.get_addend(rel);
-        apply_reloc(ctx, rel, loc, val + addend);
+        u64 val = sym.get_addr(ctx) + get_addend(cie.input_section, rel);
+        apply_reloc(ctx, rel, loc, val);
 
         if (eh_hdr_begin && is_first) {
           // Write to .eh_frame_hdr
           HdrEntry &ent = eh_hdr_begin[file->fde_idx + i];
           u64 sh_addr = ctx.eh_frame_hdr->shdr.sh_addr;
-          ent.init_addr = val + addend - sh_addr;
+          ent.init_addr = val - sh_addr;
           ent.fde_addr = this->shdr.sh_addr + offset - sh_addr;
           is_first = false;
         }
@@ -2214,6 +2181,72 @@ void EhFrameHdrSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template <typename E>
+void EhFrameRelocSection<E>::update_shdr(Context<E> &ctx) {
+  tbb::enumerable_thread_specific<i64> count;
+
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    for (CieRecord<E> &cie : file->cies)
+      if (cie.is_leader)
+        count.local() += cie.get_rels().size();
+
+    for (FdeRecord<E> &fde : file->fdes)
+      count.local() += fde.get_rels(*file).size();
+  });
+
+  this->shdr.sh_size = count.combine(std::plus()) * sizeof(ElfRel<E>);
+  this->shdr.sh_link = ctx.symtab->shndx;
+  this->shdr.sh_info = ctx.eh_frame->shndx;
+}
+
+template <typename E>
+void EhFrameRelocSection<E>::copy_buf(Context<E> &ctx) {
+  ElfRel<E> *buf = (ElfRel<E> *)(ctx.buf + this->shdr.sh_offset);
+
+  auto copy = [&](ObjectFile<E> &file, InputSection<E> &isec,
+                  const ElfRel<E> &r, u64 offset) {
+    Symbol<E> &sym = *file.symbols[r.r_sym];
+    memset(buf, 0, sizeof(*buf));
+
+    if (sym.esym().st_type == STT_SECTION) {
+      // We discard section symbols in input files and re-create new
+      // ones for each output section. So we need to adjust relocations'
+      // addends if they refer a section symbol.
+      InputSection<E> *target = sym.get_input_section();
+      buf->r_sym = target->output_section->shndx;
+
+      if constexpr (is_rela<E>)
+        buf->r_addend = r.r_addend + target->offset;
+      else if (ctx.arg.relocatable)
+        write_addend(ctx.buf + ctx.eh_frame->shdr.sh_offset + offset,
+                     get_addend(isec, r) + target->offset, r);
+    } else {
+      buf->r_sym = sym.get_output_sym_idx(ctx);
+      if constexpr (is_rela<E>)
+        buf->r_addend = r.r_addend;
+    }
+
+    buf->r_offset = ctx.eh_frame->shdr.sh_addr + offset;
+    buf->r_type = r.r_type;
+    buf++;
+  };
+
+  for (ObjectFile<E> *file : ctx.objs) {
+    for (CieRecord<E> &cie : file->cies)
+      if (cie.is_leader)
+        for (const ElfRel<E> &rel : cie.get_rels())
+          copy(*file, cie.input_section, rel,
+               cie.output_offset + rel.r_offset - cie.input_offset);
+
+    for (FdeRecord<E> &fde : file->fdes) {
+      i64 offset = file->fde_offset + fde.output_offset;
+      for (const ElfRel<E> &rel : fde.get_rels(*file))
+        copy(*file, file->cies[fde.cie_idx].input_section, rel,
+             offset + rel.r_offset - fde.input_offset);
+    }
+  }
+}
+
+template <typename E>
 void CopyrelSection<E>::add_symbol(Context<E> &ctx, Symbol<E> *sym) {
   if (sym->has_copyrel)
     return;
@@ -2237,7 +2270,7 @@ template <typename E>
 void CopyrelSection<E>::update_shdr(Context<E> &ctx) {
   // SHT_NOBITS sections (i.e. BSS sections) have to be at the end of
   // a segment, so a .copyrel.rel.ro usually requires one extra
-  // segment for it. We turn a .coyprel.rel.ro into a regular section
+  // segment for it. We turn a .copyrel.rel.ro into a regular section
   // if it is very small to avoid the cost of the extra segment.
   constexpr i64 threshold = 4096;
   if (is_relro && ctx.arg.z_relro && this->shdr.sh_size < threshold)
@@ -2526,19 +2559,71 @@ void NotePackageSection<E>::copy_buf(Context<E> &ctx) {
   write_string(buf + 4, ctx.arg.package_metadata); // Content
 }
 
+// Merges input files' .note.gnu.property values.
 template <typename E>
 void NotePropertySection<E>::update_shdr(Context<E> &ctx) {
-  features = -1;
-  for (ObjectFile<E> *file : ctx.objs)
-    features &= file->features;
+  // The rules we support are only specified for x86 psABI.
+  if (!std::is_same_v<E, I386> && !std::is_same_v<E, X86_64>)
+    return;
+
+  std::vector<ObjectFile<E> *> files = ctx.objs;
+  std::erase(files, ctx.internal_obj);
+  properties.clear();
+
+  std::set<u32> keys;
+  for (ObjectFile<E> *file : files)
+    for (std::pair<u32, u32> kv : file->gnu_properties)
+      keys.insert(kv.first);
+
+  auto get_value = [](ObjectFile<E> *file, u32 key) -> u32 {
+    auto it = file->gnu_properties.find(key);
+    if (it != file->gnu_properties.end())
+      return it->second;
+    return 0;
+  };
+
+  for (u32 key : keys) {
+    auto has_key = [&](ObjectFile<E> *file) {
+      return file->gnu_properties.contains(key);
+    };
+
+    if (GNU_PROPERTY_X86_UINT32_AND_LO <= key &&
+        key <= GNU_PROPERTY_X86_UINT32_AND_HI) {
+      // An AND feature is set if all input objects have the property and
+      // the feature.
+      if (std::all_of(files.begin(), files.end(), has_key)) {
+        properties[key] = 0xffff'ffff;
+        for (ObjectFile<E> *file : files)
+          properties[key] &= get_value(file, key);
+      }
+    } else if (GNU_PROPERTY_X86_UINT32_OR_LO <= key &&
+               key <= GNU_PROPERTY_X86_UINT32_OR_HI) {
+      // An OR feature is set if some input object has the feature.
+      for (ObjectFile<E> *file : files)
+        properties[key] |= get_value(file, key);
+    } else if (GNU_PROPERTY_X86_UINT32_OR_AND_LO <= key &&
+               key <= GNU_PROPERTY_X86_UINT32_OR_AND_HI) {
+      // An OR-AND feature is set if all input object files have the property
+      // and some of them has the feature.
+      if (std::all_of(files.begin(), files.end(), has_key))
+        for (ObjectFile<E> *file : files)
+          properties[key] |= get_value(file, key);
+    }
+  }
 
   if (ctx.arg.z_ibt)
-    features |= GNU_PROPERTY_X86_FEATURE_1_IBT;
+    properties[GNU_PROPERTY_X86_FEATURE_1_AND] |= GNU_PROPERTY_X86_FEATURE_1_IBT;
   if (ctx.arg.z_shstk)
-    features |= GNU_PROPERTY_X86_FEATURE_1_SHSTK;
+    properties[GNU_PROPERTY_X86_FEATURE_1_AND] |= GNU_PROPERTY_X86_FEATURE_1_SHSTK;
 
-  if (features != 0 && features != -1)
-    this->shdr.sh_size = E::is_64 ? 32 : 28;
+  std::erase_if(properties, [](std::pair<u32, u32> kv) {
+    return kv.second == 0;
+  });
+
+  if (properties.empty())
+    this->shdr.sh_size = 0;
+  else
+    this->shdr.sh_size = 16 + ENTRY_SIZE * properties.size();
 }
 
 template <typename E>
@@ -2547,12 +2632,17 @@ void NotePropertySection<E>::copy_buf(Context<E> &ctx) {
   memset(buf, 0, this->shdr.sh_size);
 
   buf[0] = 4;                              // Name size
-  buf[1] = E::is_64 ? 16 : 12;             // Content size
+  buf[1] = ENTRY_SIZE * properties.size(); // Content size
   buf[2] = NT_GNU_PROPERTY_TYPE_0;         // Type
   memcpy(buf + 3, "GNU", 4);               // Name
-  buf[4] = GNU_PROPERTY_X86_FEATURE_1_AND; // Feature type
-  buf[5] = 4;                              // Feature size
-  buf[6] = features;                       // Feature flags
+
+  i64 idx = 4;
+  for (std::pair<u32, u32> kv : properties) {
+    buf[idx] = kv.first;                   // Feature type
+    buf[idx + 1] = 4;                      // Feature size
+    buf[idx + 2] = kv.second;              // Feature flags
+    idx += ENTRY_SIZE / sizeof(U32<E>);
+  }
 }
 
 // This page explains the format of .gdb_index:
@@ -2892,10 +2982,17 @@ void CompressedSection<E>::copy_buf(Context<E> &ctx) {
 template <typename E>
 RelocSection<E>::RelocSection(Context<E> &ctx, OutputSection<E> &osec)
   : output_section(osec) {
-  this->name = save_string(ctx, ".rela" + std::string(osec.name));
-  this->shdr.sh_type = SHT_RELA;
+  if constexpr (is_rela<E>) {
+    this->name = save_string(ctx, ".rela" + std::string(osec.name));
+    this->shdr.sh_type = SHT_RELA;
+  } else {
+    this->name = save_string(ctx, ".rel" + std::string(osec.name));
+    this->shdr.sh_type = SHT_REL;
+  }
+
+  this->shdr.sh_flags = SHF_INFO_LINK;
   this->shdr.sh_addralign = sizeof(Word<E>);
-  this->shdr.sh_entsize = sizeof(RelaTy);
+  this->shdr.sh_entsize = sizeof(ElfRel<E>);
 
   // Compute an offset for each input section
   offsets.resize(osec.members.size());
@@ -2913,7 +3010,7 @@ RelocSection<E>::RelocSection(Context<E> &ctx, OutputSection<E> &osec)
   i64 num_entries = tbb::parallel_scan(
     tbb::blocked_range<i64>(0, osec.members.size()), 0, scan, std::plus());
 
-  this->shdr.sh_size = num_entries * sizeof(RelaTy);
+  this->shdr.sh_size = num_entries * sizeof(ElfRel<E>);
 }
 
 template <typename E>
@@ -2923,50 +3020,63 @@ void RelocSection<E>::update_shdr(Context<E> &ctx) {
 }
 
 template <typename E>
-static i64 get_output_sym_idx(Symbol<E> &sym) {
-  i64 idx2 = sym.file->output_sym_indices[sym.sym_idx];
-  assert(idx2 != -1);
-
-  if (sym.is_local())
-    return sym.file->local_symtab_idx + idx2;
-  return sym.file->global_symtab_idx + idx2;
-}
-
-template <typename E>
 void RelocSection<E>::copy_buf(Context<E> &ctx) {
   tbb::parallel_for((i64)0, (i64)output_section.members.size(), [&](i64 i) {
-    RelaTy *buf = (RelaTy *)(ctx.buf + this->shdr.sh_offset) + offsets[i];
+    ElfRel<E> *buf = (ElfRel<E> *)(ctx.buf + this->shdr.sh_offset) + offsets[i];
 
     InputSection<E> &isec = *output_section.members[i];
+    u8 *base = ctx.buf + isec.output_section->shdr.sh_offset + isec.offset;
     std::span<const ElfRel<E>> rels = isec.get_rels(ctx);
 
     for (i64 j = 0; j < rels.size(); j++) {
       const ElfRel<E> &r = rels[j];
       Symbol<E> &sym = *isec.file.symbols[r.r_sym];
-      memset(buf + j, 0, sizeof(RelaTy));
-
-      if (sym.esym().st_type != STT_SECTION && !sym.write_to_symtab) {
-        buf[j].r_type = R_NONE;
-        continue;
-      }
+      memset(&buf[j], 0, sizeof(buf[j]));
 
       buf[j].r_offset =
         isec.output_section->shdr.sh_addr + isec.offset + r.r_offset;
       buf[j].r_type = r.r_type;
 
       if (sym.esym().st_type == STT_SECTION) {
-        buf[j].r_addend = isec.get_addend(r) + isec.offset;
+        i64 addend;
 
-        if (SectionFragment<E> *frag = sym.get_frag())
+        if (SectionFragment<E> *frag = sym.get_frag()) {
           buf[j].r_sym = frag->output_section.shndx;
-        else
-          buf[j].r_sym = sym.get_input_section()->output_section->shndx;
+          addend = frag->offset + sym.value + get_addend(isec, r);
+        } else {
+          InputSection<E> *target = sym.get_input_section();
+          OutputSection<E> *osec = target->output_section;
+          buf[j].r_sym = osec->shndx;
+          addend = get_addend(isec, r) + target->offset;
+        }
+
+        if constexpr (is_rela<E>)
+          buf[j].r_addend = addend;
+        else if (ctx.arg.relocatable)
+          write_addend(base + r.r_offset, addend, r);
       } else {
-        buf[j].r_sym = get_output_sym_idx(sym);
-        buf[j].r_addend = isec.get_addend(r);
+        if (sym.sym_idx)
+          buf[j].r_sym = sym.get_output_sym_idx(ctx);
+        if constexpr (is_rela<E>)
+          buf[j].r_addend = r.r_addend;
       }
     }
   });
+}
+
+template <typename E>
+void ComdatGroupSection<E>::update_shdr(Context<E> &ctx) {
+  assert(ctx.arg.relocatable);
+  this->shdr.sh_link = ctx.symtab->shndx;
+  this->shdr.sh_info = sym.get_output_sym_idx(ctx);
+}
+
+template <typename E>
+void ComdatGroupSection<E>::copy_buf(Context<E> &ctx) {
+  U32<E> *buf = (U32<E> *)(ctx.buf + this->shdr.sh_offset);
+  *buf++ = GRP_COMDAT;
+  for (Chunk<E> *chunk : members)
+    *buf++ = chunk->shndx;
 }
 
 using E = MOLD_TARGET;
@@ -2995,6 +3105,7 @@ template class GnuHashSection<E>;
 template class MergedSection<E>;
 template class EhFrameSection<E>;
 template class EhFrameHdrSection<E>;
+template class EhFrameRelocSection<E>;
 template class CopyrelSection<E>;
 template class VersymSection<E>;
 template class VerneedSection<E>;
@@ -3005,8 +3116,9 @@ template class NotePropertySection<E>;
 template class GdbIndexSection<E>;
 template class CompressedSection<E>;
 template class RelocSection<E>;
+template class ComdatGroupSection<E>;
 template i64 to_phdr_flags(Context<E> &ctx, Chunk<E> *chunk);
 template bool is_relro(Context<E> &, Chunk<E> *);
-template ElfSym<E> to_output_esym(Context<E> &, Symbol<E> &, u32);
+template ElfSym<E> to_output_esym(Context<E> &, Symbol<E> &, u32, U32<E> *);
 
 } // namespace mold::elf

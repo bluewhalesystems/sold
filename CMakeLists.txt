@@ -45,6 +45,7 @@
 
 cmake_minimum_required(VERSION 3.13)
 project(mold VERSION 1.7.1)
+set(MOLD_PRODUCT_NAME "mold")
 
 include(CMakeDependentOption)
 include(GNUInstallDirs)
@@ -157,8 +158,8 @@ if(MOLD_USE_MIMALLOC)
     target_compile_definitions(mold PRIVATE USE_SYSTEM_MIMALLOC)
   else()
     function(mold_add_mimalloc)
-      set(MI_BUILD_STATIC ON)
-      option(MI_BUILD_TESTS "Build test executables" OFF)
+      set(MI_BUILD_STATIC ON CACHE INTERNAL "")
+      set(MI_BUILD_TESTS OFF CACHE INTERNAL "")
       add_subdirectory(third-party/mimalloc EXCLUDE_FROM_ALL)
       target_compile_definitions(mimalloc-static PRIVATE MI_USE_ENVIRON=0)
       target_link_libraries(mold PRIVATE mimalloc-static)
@@ -226,14 +227,17 @@ endif()
 # If atomics doesn't work by default, add -latomic.
 # We need the flag on riscv, armv6 and m68k.
 include(CheckCXXSourceCompiles)
-check_cxx_source_compiles("#include <cstdint>
+check_cxx_source_compiles("#include <atomic>
 int main() {
-  uint64_t x = 1;
-  __atomic_add_fetch(&x, 0, __ATOMIC_RELAXED);
-  return x;
-}" HAVE_ATOMIC_ADD_FETCH)
+  std::atomic<uint8_t> w1;
+  std::atomic<uint16_t> w2;
+  std::atomic<uint32_t> w4;
+  std::atomic<uint64_t> w8;
 
-if(NOT HAVE_ATOMIC_ADD_FETCH)
+  return ++w1 + ++w2 + ++w4 + ++w8;
+}" HAVE_FULL_ATOMIC_SUPPORT)
+
+if(NOT HAVE_FULL_ATOMIC_SUPPORT)
   target_link_libraries(mold PRIVATE atomic)
 endif()
 
@@ -387,15 +391,16 @@ if(NOT CMAKE_SKIP_INSTALL_RULES)
 
   function(mold_install_relative_symlink OLD NEW)
     install(CODE "
-      get_filename_component(PREFIX_ABS \${CMAKE_INSTALL_PREFIX} ABSOLUTE)
+      get_filename_component(PREFIX_ABS \${CMAKE_INSTALL_PREFIX}/ ABSOLUTE)
       get_filename_component(OLD_ABS ${OLD} ABSOLUTE BASE_DIR \${PREFIX_ABS})
       get_filename_component(NEW_ABS ${NEW} ABSOLUTE BASE_DIR \${PREFIX_ABS})
       get_filename_component(NEW_DIR \${NEW_ABS} DIRECTORY)
       file(RELATIVE_PATH OLD_REL \${NEW_DIR} \${OLD_ABS})
-      message(STATUS \"Installing symlink: \$ENV{DESTDIR}/\${NEW_ABS} -> \${OLD_REL}\")
-      file(MAKE_DIRECTORY \$ENV{DESTDIR}/\${NEW_DIR})
-      file(CREATE_LINK \${OLD_REL} \$ENV{DESTDIR}/\${NEW_ABS} SYMBOLIC)")
+      message(STATUS \"Installing symlink: \$ENV{DESTDIR}\${NEW_ABS} -> \${OLD_REL}\")
+      file(MAKE_DIRECTORY \$ENV{DESTDIR}\${NEW_DIR})
+      file(CREATE_LINK \${OLD_REL} \$ENV{DESTDIR}\${NEW_ABS} SYMBOLIC)")
   endfunction()
+
   mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold
     ${CMAKE_INSTALL_LIBEXECDIR}/mold/ld)
   mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold
@@ -404,4 +409,9 @@ if(NOT CMAKE_SKIP_INSTALL_RULES)
     ${CMAKE_INSTALL_BINDIR}/ld64.mold)
   mold_install_relative_symlink(${CMAKE_INSTALL_MANDIR}/man1/mold.1
     ${CMAKE_INSTALL_MANDIR}/man1/ld.mold.1)
+
+  if(NOT MOLD_PRODUCT_NAME STREQUAL "mold")
+    mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold
+      ${CMAKE_INSTALL_BINDIR}/ld.${MOLD_PRODUCT_NAME})
+  endif()
 endif()

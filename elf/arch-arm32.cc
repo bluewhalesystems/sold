@@ -114,6 +114,59 @@ template <>
 void EhFrameSection<E>::apply_reloc(Context<E> &ctx, const ElfRel<E> &rel,
                                     u64 offset, u64 val) {}
 
+template <>
+void write_addend(u8 *loc, i64 val, const ElfRel<E> &rel) {
+  switch (rel.r_type) {
+  case R_ARM_NONE:
+    break;
+  case R_ARM_ABS32:
+  case R_ARM_REL32:
+  case R_ARM_TARGET1:
+  case R_ARM_BASE_PREL:
+  case R_ARM_GOTOFF32:
+  case R_ARM_GOT_PREL:
+  case R_ARM_GOT_BREL:
+  case R_ARM_TLS_GD32:
+  case R_ARM_TLS_LDM32:
+  case R_ARM_TLS_LDO32:
+  case R_ARM_TLS_IE32:
+  case R_ARM_TLS_LE32:
+  case R_ARM_TLS_GOTDESC:
+  case R_ARM_TARGET2:
+    *(ul32 *)loc = val;
+    break;
+  case R_ARM_THM_JUMP11:
+    *(ul16 *)loc = (*(ul16 *)loc & 0xf800) | bits(val, 11, 1);
+    break;
+  case R_ARM_THM_CALL:
+  case R_ARM_THM_JUMP24:
+  case R_ARM_THM_TLS_CALL:
+    write_thm_b_imm(loc, val);
+    break;
+  case R_ARM_CALL:
+  case R_ARM_JUMP24:
+    *(ul32 *)loc = (*(ul32 *)loc & 0xff00'0000) | bits(val, 25, 2);
+    break;
+  case R_ARM_MOVW_PREL_NC:
+  case R_ARM_MOVW_ABS_NC:
+  case R_ARM_MOVT_PREL:
+  case R_ARM_MOVT_ABS:
+    write_mov_imm(loc, val);
+    break;
+  case R_ARM_PREL31:
+    *(ul32 *)loc = (*(ul32 *)loc & 0x8000'0000) | (val & 0x7fff'ffff);
+    break;
+  case R_ARM_THM_MOVW_PREL_NC:
+  case R_ARM_THM_MOVW_ABS_NC:
+  case R_ARM_THM_MOVT_PREL:
+  case R_ARM_THM_MOVT_ABS:
+    write_thm_mov_imm(loc, val);
+    break;
+  default:
+    unreachable();
+  }
+}
+
 // ARM and Thumb branch instructions can jump within ±16 MiB.
 static bool is_jump_reachable(i64 val) {
   return sign_extend(val, 24) == val;
@@ -156,7 +209,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     };
 
 #define S   sym.get_addr(ctx)
-#define A   this->get_addend(rel)
+#define A   get_addend(*this, rel)
 #define P   (get_addr() + rel.r_offset)
 #define T   (sym.get_addr(ctx) & 1)
 #define G   (sym.get_got_idx(ctx) * sizeof(Word<E>))
@@ -210,6 +263,9 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     }
     case R_ARM_BASE_PREL:
       *(ul32 *)loc = GOT + A - P;
+      break;
+    case R_ARM_GOTOFF32:
+      *(ul32 *)loc = ((S + A) | T) - GOT;
       break;
     case R_ARM_GOT_PREL:
     case R_ARM_TARGET2:
@@ -307,7 +363,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_ARM_PREL31: {
       i64 val = S + A - P;
       check(val, -(1LL << 30), 1LL << 30);
-      *(ul32 *)loc = (*(ul32 *)loc & 0x8000'0000) | ((val) & 0x7fff'ffff);
+      *(ul32 *)loc = (*(ul32 *)loc & 0x8000'0000) | (val & 0x7fff'ffff);
       break;
     }
     case R_ARM_THM_MOVW_ABS_NC:
@@ -405,7 +461,7 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
     std::tie(frag, frag_addend) = get_fragment(ctx, rel);
 
 #define S (frag ? frag->get_addr(ctx) : sym.get_addr(ctx))
-#define A (frag ? frag_addend : this->get_addend(rel))
+#define A (frag ? frag_addend : get_addend(*this, rel))
 
     switch (rel.r_type) {
     case R_ARM_ABS32:
@@ -452,7 +508,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     }
 
     if (sym.is_ifunc())
-      sym.flags |= (NEEDS_GOT | NEEDS_PLT);
+      sym.flags.fetch_or(NEEDS_GOT | NEEDS_PLT, std::memory_order_relaxed);
 
     switch (rel.r_type) {
     case R_ARM_ABS32:
@@ -466,12 +522,12 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_ARM_JUMP24:
     case R_ARM_THM_JUMP24:
       if (sym.is_imported)
-        sym.flags |= NEEDS_PLT;
+        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
       break;
     case R_ARM_GOT_PREL:
     case R_ARM_GOT_BREL:
     case R_ARM_TARGET2:
-      sym.flags |= NEEDS_GOT;
+      sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
       break;
     case R_ARM_MOVT_PREL:
     case R_ARM_THM_MOVT_PREL:
@@ -479,20 +535,21 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       scan_rel(ctx, sym, rel, pcrel_table);
       break;
     case R_ARM_TLS_GD32:
-      sym.flags |= NEEDS_TLSGD;
+      sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
       break;
     case R_ARM_TLS_LDM32:
       ctx.needs_tlsld = true;
       break;
     case R_ARM_TLS_IE32:
-      sym.flags |= NEEDS_GOTTP;
+      sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
       break;
     case R_ARM_TLS_GOTDESC:
       if (!relax_tlsdesc(ctx, sym))
-        sym.flags |= NEEDS_TLSDESC;
+        sym.flags.fetch_or(NEEDS_TLSDESC, std::memory_order_relaxed);
       break;
     case R_ARM_REL32:
     case R_ARM_BASE_PREL:
+    case R_ARM_GOTOFF32:
     case R_ARM_THM_JUMP11:
     case R_ARM_THM_JUMP19:
     case R_ARM_MOVW_PREL_NC:
@@ -618,9 +675,10 @@ void fixup_arm_exidx_section(Context<E> &ctx) {
   Timer t(ctx, "fixup_arm_exidx_section");
 
   auto find_exidx = [&]() -> OutputSection<E> * {
-    for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-      if (osec->shdr.sh_type == SHT_ARM_EXIDX)
-        return osec.get();
+    for (Chunk<E> *chunk : ctx.chunks)
+      if (OutputSection<E> *osec = chunk->to_osec())
+        if (osec->shdr.sh_type == SHT_ARM_EXIDX)
+          return osec;
     return nullptr;
   };
 
@@ -634,14 +692,14 @@ void fixup_arm_exidx_section(Context<E> &ctx) {
   // .ARM.exidx's sh_link should be set to the .text section index.
   // Runtime doesn't care about it, but the binutils's strip command does.
   if (ctx.shdr) {
-    auto find_text = [&]() -> OutputSection<E> * {
-      for (std::unique_ptr<OutputSection<E>> &osec : ctx.output_sections)
-        if (osec->name == ".text")
-          return osec.get();
+    auto find_text = [&]() -> Chunk<E> * {
+      for (Chunk<E> *chunk : ctx.chunks)
+        if (chunk->name == ".text")
+          return chunk;
       return nullptr;
     };
 
-    if (OutputSection<E> *text = find_text()) {
+    if (Chunk<E> *text = find_text()) {
       exidx->shdr.sh_link = text->shndx;
       ctx.shdr->copy_buf(ctx);
     }

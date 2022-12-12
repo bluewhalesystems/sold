@@ -58,7 +58,7 @@ void write_plt_header(Context<E> &ctx, u8 *buf) {
       0xb9, 0, 0, 0, 0,       // mov    GOTPLT+4, %ecx
       0xff, 0x31,             // push   (%ecx)
       0xff, 0x61, 0x04,       // jmp    *0x4(%ecx)
-      0x90,                   // nop
+      0xcc,                   // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
     *(ul32 *)(buf + 6) = ctx.gotplt->shdr.sh_addr + 4;
@@ -72,7 +72,7 @@ void write_plt_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
       0xf3, 0x0f, 0x1e, 0xfb, // endbr32
       0xb9, 0, 0, 0, 0,       // mov $reloc_offset, %ecx
       0xff, 0xa3, 0, 0, 0, 0, // jmp *foo@GOT(%ebx)
-      0x90,                   // nop
+      0xcc,                   // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
     *(ul32 *)(buf + 11) = sym.get_gotplt_addr(ctx) - ctx.got->shdr.sh_addr;
@@ -81,7 +81,7 @@ void write_plt_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
       0xf3, 0x0f, 0x1e, 0xfb, // endbr32
       0xb9, 0, 0, 0, 0,       // mov $reloc_offset, %ecx
       0xff, 0x25, 0, 0, 0, 0, // jmp *foo@GOT
-      0x90,                   // nop
+      0xcc,                   // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
     *(ul32 *)(buf + 11) = sym.get_gotplt_addr(ctx);
@@ -96,7 +96,7 @@ void write_pltgot_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
     static const u8 insn[] = {
       0xf3, 0x0f, 0x1e, 0xfb,             // endbr32
       0xff, 0xa3, 0, 0, 0, 0,             // jmp *foo@GOT(%ebx)
-      0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00, // nop
+      0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
     *(ul32 *)(buf + 6) = sym.get_got_addr(ctx) - ctx.got->shdr.sh_addr;
@@ -104,7 +104,7 @@ void write_pltgot_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
     static const u8 insn[] = {
       0xf3, 0x0f, 0x1e, 0xfb,             // endbr32
       0xff, 0x25, 0, 0, 0, 0,             // jmp *foo@GOT
-      0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00, // nop
+      0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
     *(ul32 *)(buf + 6) = sym.get_got_addr(ctx);
@@ -127,6 +127,41 @@ void EhFrameSection<E>::apply_reloc(Context<E> &ctx, const ElfRel<E> &rel,
     break;
   default:
     Fatal(ctx) << "unsupported relocation in .eh_frame: " << rel;
+  }
+}
+
+template <>
+void write_addend(u8 *loc, i64 val, const ElfRel<E> &rel) {
+  switch (rel.r_type) {
+  case R_386_NONE:
+    break;
+  case R_386_8:
+  case R_386_PC8:
+    *loc = val;
+    break;
+  case R_386_16:
+  case R_386_PC16:
+    *(ul16 *)loc = val;
+    break;
+  case R_386_32:
+  case R_386_PC32:
+  case R_386_GOT32:
+  case R_386_GOT32X:
+  case R_386_PLT32:
+  case R_386_GOTOFF:
+  case R_386_GOTPC:
+  case R_386_TLS_LDM:
+  case R_386_TLS_GOTIE:
+  case R_386_TLS_LE:
+  case R_386_TLS_IE:
+  case R_386_TLS_GD:
+  case R_386_TLS_LDO_32:
+  case R_386_SIZE32:
+  case R_386_TLS_GOTDESC:
+    *(ul32 *)loc = val;
+    break;
+  default:
+    unreachable();
   }
 }
 
@@ -162,7 +197,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     };
 
 #define S   sym.get_addr(ctx)
-#define A   this->get_addend(rel)
+#define A   get_addend(*this, rel)
 #define P   (get_addr() + rel.r_offset)
 #define G   (sym.get_got_idx(ctx) * sizeof(Word<E>))
 #define GOT ctx.got->shdr.sh_addr
@@ -238,7 +273,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         case R_386_PC32: {
           static const u8 insn[] = {
             0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
-            0x81, 0xe8, 0, 0, 0, 0, // add $val, %eax
+            0x81, 0xe8, 0, 0, 0, 0, // sub $val, %eax
           };
           memcpy(loc - 3, insn, sizeof(insn));
           *(ul32 *)(loc + 5) = ctx.tp_addr - S - A;
@@ -248,7 +283,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         case R_386_GOT32X: {
           static const u8 insn[] = {
             0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
-            0x81, 0xe8, 0, 0, 0, 0, // add $val, %eax
+            0x81, 0xe8, 0, 0, 0, 0, // sub $val, %eax
           };
           memcpy(loc - 2, insn, sizeof(insn));
           *(ul32 *)(loc + 6) = ctx.tp_addr - S - A;
@@ -361,7 +396,7 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
     std::tie(frag, frag_addend) = get_fragment(ctx, rel);
 
 #define S (frag ? frag->get_addr(ctx) : sym.get_addr(ctx))
-#define A (frag ? frag_addend : this->get_addend(rel))
+#define A (frag ? frag_addend : get_addend(*this, rel))
 #define G   (sym.get_got_idx(ctx) * sizeof(Word<E>))
 #define GOT ctx.got->shdr.sh_addr
 
@@ -447,7 +482,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     }
 
     if (sym.is_ifunc())
-      sym.flags |= (NEEDS_GOT | NEEDS_PLT);
+      sym.flags.fetch_or(NEEDS_GOT | NEEDS_PLT, std::memory_order_relaxed);
 
     switch (rel.r_type) {
     case R_386_8:
@@ -464,23 +499,23 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       break;
     case R_386_GOT32:
     case R_386_GOTPC:
-      sym.flags |= NEEDS_GOT;
+      sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
       break;
     case R_386_GOT32X: {
       bool do_relax = ctx.arg.relax && !sym.is_imported &&
                       sym.is_relative() && relax_got32x(loc - 2);
       if (!do_relax)
-        sym.flags |= NEEDS_GOT;
+        sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
       break;
     }
     case R_386_PLT32:
       if (sym.is_imported)
-        sym.flags |= NEEDS_PLT;
+        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
       break;
     case R_386_TLS_GOTIE:
     case R_386_TLS_LE:
     case R_386_TLS_IE:
-      sym.flags |= NEEDS_GOTTP;
+      sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
       break;
     case R_386_TLS_GD:
       if (i + 1 == rels.size())
@@ -494,7 +529,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       if (relax_tlsgd(ctx, sym))
         i++;
       else
-        sym.flags |= NEEDS_TLSGD;
+        sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
       break;
     case R_386_TLS_LDM:
       if (i + 1 == rels.size())
@@ -512,7 +547,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       break;
     case R_386_TLS_GOTDESC:
       if (!relax_tlsdesc(ctx, sym))
-        sym.flags |= NEEDS_TLSDESC;
+        sym.flags.fetch_or(NEEDS_TLSDESC, std::memory_order_relaxed);
       break;
     case R_386_GOTOFF:
     case R_386_TLS_LDO_32:
