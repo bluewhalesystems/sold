@@ -15,36 +15,10 @@ license at [our website](https://bluewhale.systems).
 
 ## How to build
 
-sold is written in C++20, so if you build sold yourself, you need a
-recent version of a C++ compiler and a C++ standard library. GCC 10.2
-or Clang 12.0.0 (or later) as well as libstdc++ 10 or libc++ 7 (or
-later) are recommended.
-
-### Install dependencies
-
-To install build dependencies, run `./install-build-deps.sh` in this
-directory. It recognizes your Linux distribution and tries to install
-necessary packages. You may want to run it as root.
-
-### Compile sold
-
-```shell
-git clone https://github.com/bluewhalesystems/sold.git
-mkdir sold/build
-cd sold/build
-../install-build-deps.sh
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=c++ ..
-cmake --build . -j $(nproc)
-sudo cmake --install .
-```
-
-You may need to pass a C++20 compiler command name to `cmake`.
-In the above case, `c++` is passed. If it doesn't work for you,
-try a specific version of a compiler such as `g++-10` or `clang++-12`.
-
-By default, `sold` is installed to `/usr/local/bin`. You can change
-that by passing `-DCMAKE_INSTALL_PREFIX=<directory>`. For other cmake
-options, see the comments in `CMakeLists.txt`.
+The build instruction for sold is the same as for mold except that you
+check out `https://github.com/bluewhalesystems/sold.git` instead of
+`https://github.com/rui314/mold.git`. For the details, see
+https://github.com/rui314/mold#how-to-build.
 
 ## How to use
 
