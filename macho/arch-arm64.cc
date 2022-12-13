@@ -102,9 +102,9 @@ void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
   u64 msgsend_got_addr = get_symbol(ctx, "_objc_msgSend")->get_got_addr(ctx);
 
   for (i64 i = 0; i < symbols.size(); i++) {
-    ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset + sizeof(insn) * i);
+    ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset + ENTRY_SIZE * i);
     u64 sel_addr = ctx.objc_selrefs->hdr.addr + word_size * i;
-    u64 ent_addr = this->hdr.addr + sizeof(insn) * i;
+    u64 ent_addr = this->hdr.addr + ENTRY_SIZE * i;
 
     memcpy(buf, insn, sizeof(insn));
     buf[0] |= page_offset(sel_addr, ent_addr);

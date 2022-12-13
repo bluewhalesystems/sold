@@ -58,7 +58,29 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template <>
-void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {}
+void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
+  if (this->hdr.size == 0)
+    return;
+
+  static const u8 insn[] = {
+    0x48, 0x8b, 0x35, 0, 0, 0, 0, // mov @selector("foo")(%rip), %rsi
+    0xff, 0x25, 0, 0, 0, 0,       // jmp *_objc_msgSend@GOT(%rip)
+    0xcc, 0xcc, 0xcc,             // (padding)
+  };
+  static_assert(sizeof(insn) == ENTRY_SIZE);
+
+  u64 msgsend_got_addr = get_symbol(ctx, "_objc_msgSend")->get_got_addr(ctx);
+
+  for (i64 i = 0; i < symbols.size(); i++) {
+    ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset + ENTRY_SIZE * i);
+    u64 sel_addr = ctx.objc_selrefs->hdr.addr + word_size * i;
+    u64 ent_addr = this->hdr.addr + ENTRY_SIZE * i;
+
+    memcpy(buf, insn, sizeof(insn));
+    *(ul32 *)(buf + 3) = sel_addr - ent_addr - 7;
+    *(ul32 *)(buf + 9) = msgsend_got_addr - ent_addr - 13;
+  }
+}
 
 static i64 get_reloc_addend(u32 type) {
   switch (type) {
