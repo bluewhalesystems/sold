@@ -3,11 +3,8 @@
 The "sold" linker is a commercial version of the
 [mold](https://github.com/rui314/mold) linker. Unlike the mold linker whose
 license is AGPL, the sold linker is available under an ordinary, per-user,
-per-month/year commercial license. The sold linker is the best option for
-organizations who don't want to use AGPL'ed programs.
-
-Except for the product names and their licenses, sold and mold are the same
-program.
+per-month/year commercial license. sold is a superset of mold; in addition
+to all the mold's features, sold supports macOS/iOS.
 
 Please see the [End User Agreement License](LICENSE.md) for the details about
 licensing terms. You can purchase a subscription or obtain an evaluation
