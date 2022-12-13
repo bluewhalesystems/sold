@@ -1188,9 +1188,10 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
     return 0;
   };
 
-  std::stable_sort(buf, buf + this->hdr.size / sizeof(MachSym),
-       [&](const MachSym &a, const MachSym &b) {
-     return std::tuple{get_rank(a), a.value} < std::tuple{get_rank(b), b.value};
+  tbb::parallel_sort(buf, buf + this->hdr.size / sizeof(MachSym),
+                     [&](const MachSym &a, const MachSym &b) {
+     return std::tuple{get_rank(a), a.value, a.stroff} <
+            std::tuple{get_rank(b), b.value, b.stroff};
   });
 }
 
