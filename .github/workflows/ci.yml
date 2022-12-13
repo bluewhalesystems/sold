@@ -6,6 +6,7 @@ on:
     branches: [ main ]
 env:
   UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+  MOLD_SUPPRESS_MACHO_WARNING: 1
 jobs:
   build-clang:
     strategy:
@@ -110,6 +111,7 @@ jobs:
         cd build
         cmake ${{ matrix.target }} ..
         cmake --build . -j$(sysctl -n hw.physicalcpu)
+        ctest . -j$(sysctl -n hw.physicalcpu)
 
   build-windows:
     runs-on: windows-latest
