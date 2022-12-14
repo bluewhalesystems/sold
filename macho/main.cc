@@ -927,6 +927,9 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
     } else if (opt == "-reexport-l") {
       ctx.reexport_l = true;
       read_library(arg);
+    } else if (opt == "-reexport_library") {
+      ctx.reexport_l = true;
+      read_file(ctx, MappedFile<Context<E>>::must_open(ctx, arg));
     } else {
       unreachable();
     }
