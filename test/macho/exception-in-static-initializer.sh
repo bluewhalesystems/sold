@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | c++ -c -o $t/a.o -xc++ -std=c++20 -
 #include <exception>
@@ -29,5 +24,3 @@ EOF
 c++ --ld-path=./ld64 -o $t/exe $t/a.o
 ( set +e; $t/exe; true ) >& $t/log
 grep -q 'terminating with uncaught exception of type Error: ERROR STRING' $t/log
-
-echo OK

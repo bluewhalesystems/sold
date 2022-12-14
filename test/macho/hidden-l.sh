@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | cc -c -o $t/a.o -fPIC -xc -
 void foo() {}
@@ -36,5 +31,3 @@ nm -g $t/f.dylib > $t/log
 grep -q ' _foo$' $t/log
 ! grep -q ' _bar$' $t/log || false
 grep -q ' _baz$' $t/log
-
-echo OK

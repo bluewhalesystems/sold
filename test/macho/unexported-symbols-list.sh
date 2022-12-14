@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | cc -o $t/a.o -c -xc -
 void foo() {}
@@ -46,5 +41,3 @@ objdump --macho --exports-trie $t/e.dylib > $t/log3
 grep -q _baz $t/log3
 grep -q _abc $t/log3
 grep -q _xyz $t/log3
-
-echo OK

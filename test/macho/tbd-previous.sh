@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat > $t/libfoo.tbd <<'EOF'
 --- !tapi-tbd
@@ -38,5 +33,3 @@ cc --ld-path=./ld64 -shared -o $t/b.dylib $t/libfoo.tbd $t/a.o \
   -Wl,-platform_version,macos,14.0,14.0 2> /dev/null
 
 otool -L $t/b.dylib | grep -q /bar
-
-echo OK

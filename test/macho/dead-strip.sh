@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | cc -o $t/a.o -c -xc -
 #include <stdio.h>
@@ -30,5 +25,3 @@ $t/exe | grep -q 'Hello world'
 otool -tVj $t/exe > $t/log
 grep -q 'hello:' $t/log
 ! grep -q 'howdy:' $t/log || false
-
-echo OK

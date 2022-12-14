@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 [ "`uname -p`" = arm ] && { echo skipped; exit; }
 
@@ -25,5 +20,3 @@ $t/exe | grep -q 'Hello world'
 
 otool -l $t/exe | grep -A5 'segname __PAGEZERO' | \
   grep -q 'vmsize 0x0000000000010000'
-
-echo OK

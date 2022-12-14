@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat > $t/libfoo.tbd <<'EOF'
 --- !tapi-tbd
@@ -34,5 +29,3 @@ EOF
 
 cc --ld-path=./ld64 -shared -o $t/b.dylib $t/libfoo.tbd $t/a.o \
   -Wl,-platform_version,macos,14.0,13.0 >& /dev/null
-
-echo OK

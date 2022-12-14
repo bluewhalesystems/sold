@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<'EOF' > $t/a.tbd
 --- !tapi-tbd
@@ -35,5 +30,3 @@ cc -o $t/exe1 $t/b.o $t/a.tbd >& $t/log1
 
 cc -o $t/exe1 $t/b.o $t/a.tbd -Wl,-application_extension >& $t/log2
 grep -q 'application extension' $t/log2
-
-echo OK

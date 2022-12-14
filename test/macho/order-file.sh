@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | cc -o $t/a.o -c -xc -
 #include <stdio.h>
@@ -35,5 +30,3 @@ $t/exe1 | grep -q '^1$'
 
 cc --ld-path=./ld64 -o $t/exe2 $t/a.o -Wl,-order_file,$t/order2
 $t/exe2 | grep -q '^0$'
-
-echo OK

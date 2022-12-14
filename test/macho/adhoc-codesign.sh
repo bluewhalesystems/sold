@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | cc -c -o $t/a.o -xc -
 #include <stdio.h>
@@ -23,5 +18,3 @@ otool -l $t/exe2 > $t/log2
 ! grep -q LC_CODE_SIGNATURE $t/log2 || false
 grep -q LC_UUID $t/log2
 ! grep -q 'uuid 00000000-0000-0000-0000-000000000000' $t/log2 || false
-
-echo OK

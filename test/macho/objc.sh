@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 cat <<EOF | cc -o $t/a.o -c -xobjective-c -
 #import <Foundation/NSObject.h>
@@ -25,5 +20,3 @@ cc -o $t/exe $t/c.o $t/b.a
 
 ! cc -o $t/exe $t/c.o $t/b.a -Wl,-ObjC > $t/log 2>&1
 grep -q _OBJC_CLASS_ $t/log
-
-echo OK

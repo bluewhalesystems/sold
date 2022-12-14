@@ -1,10 +1,5 @@
 #!/bin/bash
-export LC_ALL=C
-set -e
-testname=$(basename "$0" .sh)
-echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -m)/$testname
-mkdir -p $t
+. $(dirname $0)/common.inc
 
 mkdir -p $t/foo/bar
 
@@ -19,5 +14,3 @@ EOF
 
 cc --ld-path=./ld64 -shared -o $t/b.dylib $t/a.o -nodefaultlibs \
   -L/foo/bar -isysroot $t -lbaz
-
-echo OK
