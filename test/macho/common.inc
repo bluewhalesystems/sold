@@ -32,5 +32,5 @@ trap on_exit EXIT
 # Print out the startup message
 testname=$(basename "$0" .sh)
 echo -n "Testing $testname ... "
-t=out/test/elf/$MACHINE/$testname
+t=out/test/macho/$(uname -p)/$testname
 mkdir -p $t
