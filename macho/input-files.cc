@@ -863,8 +863,15 @@ void DylibFile<E>::parse(Context<E> &ctx) {
 
   // Read reexported libraries if any
   for (std::string_view path : reexported_libs) {
-    MappedFile<Context<E>> *mf =
-      find_external_lib(ctx, install_name, std::string(path));
+    MappedFile<Context<E>> *mf = nullptr;
+
+    if (remove_prefix(path, "@loader_path/")) {
+      std::string path2 = path_clean(this->mf->name + "/../" + std::string(path));
+      mf = find_external_lib(ctx, install_name, path2);
+    } else {
+      mf = find_external_lib(ctx, install_name, std::string(path));
+    }
+
     if (!mf)
       Fatal(ctx) << install_name << ": cannot open reexported library " << path;
 
