@@ -817,31 +817,51 @@ DylibFile<E> *DylibFile<E>::create(Context<E> &ctx, MappedFile<Context<E>> *mf) 
 
 template <typename E>
 static MappedFile<Context<E>> *
-find_external_lib(Context<E> &ctx, std::string_view parent, std::string path) {
-  if (!path.starts_with('/'))
-    return MappedFile<Context<E>>::open(ctx, path);
+find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
+  auto find = [&](std::string path) -> MappedFile<Context<E>> * {
+    if (!path.starts_with('/'))
+      return MappedFile<Context<E>>::open(ctx, path);
 
-  for (const std::string &root : ctx.arg.syslibroot) {
-    if (path.ends_with(".tbd")) {
-      if (auto *file = MappedFile<Context<E>>::open(ctx, root + path))
-        return file;
-      continue;
+    for (const std::string &root : ctx.arg.syslibroot) {
+      if (path.ends_with(".tbd")) {
+        if (auto *file = MappedFile<Context<E>>::open(ctx, root + path))
+          return file;
+        continue;
+      }
+
+      if (path.ends_with(".dylib")) {
+        std::string stem(path.substr(0, path.size() - 6));
+        if (auto *file = MappedFile<Context<E>>::open(ctx, root + stem + ".tbd"))
+          return file;
+        if (auto *file = MappedFile<Context<E>>::open(ctx, root + path))
+          return file;
+      }
+
+      for (std::string extn : {".tbd", ".dylib"})
+        if (auto *file = MappedFile<Context<E>>::open(ctx, root + path + extn))
+          return file;
     }
 
-    if (path.ends_with(".dylib")) {
-      std::string stem(path.substr(0, path.size() - 6));
-      if (auto *file = MappedFile<Context<E>>::open(ctx, root + stem + ".tbd"))
-        return file;
-      if (auto *file = MappedFile<Context<E>>::open(ctx, root + path))
-        return file;
-    }
+    return nullptr;
+  };
 
-    for (std::string extn : {".tbd", ".dylib"})
-      if (auto *file = MappedFile<Context<E>>::open(ctx, root + path + extn))
-        return file;
+  if (path.starts_with("@loader_path/")) {
+    path = path_clean(std::string(parent.mf->name) + "/../" + path.substr(13));
+    return find(path);
   }
 
-  return nullptr;
+  if (path.starts_with("@rpath/")) {
+    for (std::string_view rpath : parent.rpaths) {
+      std::string path2 = path_clean(std::string(rpath) + "/" + path.substr(6));
+      if (path2.starts_with("@loader_path/"))
+        path2 = path_clean(std::string(parent.mf->name) + "/../" + path2);
+      if (MappedFile<Context<E>> *ret = find(path2))
+        return ret;
+    }
+    return nullptr;
+  }
+
+  return find(path);
 }
 
 template <typename E>
@@ -863,15 +883,8 @@ void DylibFile<E>::parse(Context<E> &ctx) {
 
   // Read reexported libraries if any
   for (std::string_view path : reexported_libs) {
-    MappedFile<Context<E>> *mf = nullptr;
-
-    if (remove_prefix(path, "@loader_path/")) {
-      std::string path2 = path_clean(this->mf->name + "/../" + std::string(path));
-      mf = find_external_lib(ctx, install_name, path2);
-    } else {
-      mf = find_external_lib(ctx, install_name, std::string(path));
-    }
-
+    MappedFile<Context<E>> *mf =
+      find_external_lib(ctx, *this, std::string(path));
     if (!mf)
       Fatal(ctx) << install_name << ": cannot open reexported library " << path;
 
@@ -971,6 +984,11 @@ void DylibFile<E>::parse_dylib(Context<E> &ctx) {
         reexported_libs.push_back((char *)p + cmd.nameoff);
       }
       break;
+    case LC_RPATH: {
+      RpathCommand &cmd = *(RpathCommand *)p;
+      rpaths.push_back((char *)p + cmd.path_off);
+      break;
+    }
     }
     p += lc.cmdsize;
   }
