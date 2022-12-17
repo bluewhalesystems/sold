@@ -145,7 +145,7 @@ private:
   MachSection *unwind_sec = nullptr;
   std::unique_ptr<MachSection> common_hdr;
   InputSection<E> *common_sec = nullptr;
-  std::vector<Subsection<E> *> subsec_pool;
+  std::vector<std::unique_ptr<Subsection<E>>> subsec_pool;
 };
 
 template <typename E>
