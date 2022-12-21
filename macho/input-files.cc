@@ -74,6 +74,8 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
   else
     init_subsections(ctx);
 
+  split_cstring_literals(ctx);
+
   sort(subsections, [](Subsection<E> *a, Subsection<E> *b) {
     return a->input_addr < b->input_addr;
   });
@@ -259,53 +261,26 @@ template <typename E>
 void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   sym_to_subsec.resize(mach_syms.size());
 
-  auto add = [&](InputSection<E> &isec, u32 offset, u32 size, u8 p2align,
-                 bool is_cstring) {
-    Subsection<E> *subsec = new Subsection<E>{
-      .isec = isec,
-      .input_offset = offset,
-      .input_size = size,
-      .input_addr = (u32)(isec.hdr.addr + offset),
-      .p2align = p2align,
-      .is_cstring = is_cstring,
-    };
-
-    subsec_pool.emplace_back(subsec);
-    subsections.push_back(subsec);
-  };
-
   // Split regular sections into subsections.
   for (SplitInfo<E> &info : split_regular_sections(ctx, *this)) {
     InputSection<E> &isec = *info.isec;
     for (SplitRegion &r : info.regions) {
-      if (!r.is_alt_entry)
-        add(isec, r.offset, r.size, isec.hdr.p2align, false);
+      if (!r.is_alt_entry) {
+        Subsection<E> *subsec = new Subsection<E>{
+          .isec = isec,
+          .input_offset = r.offset,
+          .input_size = r.size,
+          .input_addr = (u32)(isec.hdr.addr + r.offset),
+          .p2align = (u8)isec.hdr.p2align,
+          .is_cstring = false,
+        };
+
+        subsec_pool.emplace_back(subsec);
+        subsections.push_back(subsec);
+      }
+
       if (r.symidx != -1)
         sym_to_subsec[r.symidx] = subsections.back();
-    }
-  }
-
-  // Split __cstring section.
-  for (std::unique_ptr<InputSection<E>> &isec : sections) {
-    if (isec && isec->hdr.type == S_CSTRING_LITERALS) {
-      std::string_view str = isec->contents;
-      size_t pos = 0;
-
-      while (pos < str.size()) {
-        size_t end = str.find('\0', pos);
-        if (end == str.npos)
-          Fatal(ctx) << *this << " corruupted cstring section: " << *isec;
-
-        end = str.find_first_not_of('\0', end);
-        if (end == str.npos)
-          end = str.size();
-
-        // A constant string in __cstring has no alignment info, so we
-        // need to infer it.
-        u8 p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos));
-        add(*isec, pos, end - pos, p2align, true);
-        pos = end;
-      }
     }
   }
 }
@@ -337,6 +312,42 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
   }
 
   std::erase(subsections, nullptr);
+}
+
+// Split __cstring section.
+template <typename E>
+void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
+  for (std::unique_ptr<InputSection<E>> &isec : sections) {
+    if (isec && isec->hdr.type == S_CSTRING_LITERALS) {
+      std::string_view str = isec->contents;
+      size_t pos = 0;
+
+      while (pos < str.size()) {
+        size_t end = str.find('\0', pos);
+        if (end == str.npos)
+          Fatal(ctx) << *this << " corruupted cstring section: " << *isec;
+
+        end = str.find_first_not_of('\0', end);
+        if (end == str.npos)
+          end = str.size();
+
+        // A constant string in __cstring has no alignment info, so we
+        // need to infer it.
+        Subsection<E> *subsec = new Subsection<E>{
+          .isec = *isec,
+          .input_offset = (u32)pos,
+          .input_size = (u32)(end - pos),
+          .input_addr = (u32)(isec->hdr.addr + pos),
+          .p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos)),
+          .is_cstring = true,
+        };
+
+        subsec_pool.emplace_back(subsec);
+        subsections.push_back(subsec);
+        pos = end;
+      }
+    }
+  }
 }
 
 // Fix local symbols `subsec` members.

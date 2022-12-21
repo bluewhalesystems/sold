@@ -136,6 +136,7 @@ private:
   void parse_symbols(Context<E> &ctx);
   void split_subsections_via_symbols(Context<E> &ctx);
   void init_subsections(Context<E> &ctx);
+  void split_cstring_literals(Context<E> &ctx);
   void fix_subsec_members(Context<E> &ctx);
   void parse_data_in_code(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
