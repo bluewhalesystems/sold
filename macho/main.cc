@@ -345,16 +345,13 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
 
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
     ctx.objc_selrefs.reset(new ObjcSelrefsSection<E>(ctx));
-    ctx.objc_methname.reset(new ObjcMethnameSection<E>(ctx));
 
     tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
       return a->name < b->name;
     });
 
-    for (Symbol<E> *sym : syms) {
-      ctx.internal_obj->syms.push_back(sym);
-      ctx.objc_stubs->add(ctx, sym);
-    }
+    for (Symbol<E> *sym : syms)
+      ctx.internal_obj->add_msgsend_symbol(ctx, *sym);
 
     Symbol<E> *sym = get_symbol(ctx, "_objc_msgSend");
     if (!sym->file)

@@ -131,6 +131,9 @@ public:
   // For the internal file and LTO object files
   std::vector<MachSym> mach_syms2;
 
+  // For the internal file
+  void add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym);
+
 private:
   void parse_sections(Context<E> &ctx);
   void parse_symbols(Context<E> &ctx);
@@ -143,10 +146,15 @@ private:
   InputSection<E> *get_common_sec(Context<E> &ctx);
   void parse_lto_symbols(Context<E> &ctx);
 
+  Subsection<E> *add_string(Context<E> &ctx, std::string_view seg,
+                            std::string_view sect, std::string_view contents);
+
   MachSection *unwind_sec = nullptr;
   std::unique_ptr<MachSection> common_hdr;
   InputSection<E> *common_sec = nullptr;
+
   std::vector<std::unique_ptr<Subsection<E>>> subsec_pool;
+  std::vector<std::unique_ptr<MachSection>> mach_sec_pool;
 };
 
 template <typename E>
@@ -616,10 +624,9 @@ public:
     this->hdr.attr = S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS;
   }
 
-  void add(Context<E> &ctx, Symbol<E> *sym);
   void copy_buf(Context<E> &ctx) override;
 
-  std::vector<Symbol<E> *> symbols;
+  std::vector<Subsection<E> *> methnames;
 
   static constexpr i64 ENTRY_SIZE = std::is_same_v<E, ARM64> ? 32 : 16;
 };
@@ -632,18 +639,6 @@ public:
     this->hdr.p2align = 3;
     this->hdr.type = S_LITERAL_POINTERS;
     this->hdr.attr = S_ATTR_NO_DEAD_STRIP;
-  }
-
-  void copy_buf(Context<E> &ctx) override;
-};
-
-template <typename E>
-class ObjcMethnameSection : public Chunk<E> {
-public:
-  ObjcMethnameSection(Context<E> &ctx)
-    : Chunk<E>(ctx, "__TEXT", "__objc_methname") {
-    this->hdr.p2align = 0;
-    this->hdr.type = S_CSTRING_LITERALS;
   }
 
   void copy_buf(Context<E> &ctx) override;
@@ -1019,7 +1014,6 @@ struct Context {
   std::unique_ptr<CodeSignatureSection<E>> code_sig;
   std::unique_ptr<ObjcStubsSection<E>> objc_stubs;
   std::unique_ptr<ObjcSelrefsSection<E>> objc_selrefs;
-  std::unique_ptr<ObjcMethnameSection<E>> objc_methname;
 
   OutputSection<E> *text = nullptr;
   OutputSection<E> *data = nullptr;

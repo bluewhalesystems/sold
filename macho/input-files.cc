@@ -810,6 +810,65 @@ std::string_view ObjectFile<E>::get_linker_optimization_hints(Context<E> &ctx) {
 }
 
 template <typename E>
+void ObjectFile<E>::add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym) {
+  std::string_view prefix = "_objc_msgSend$";
+  assert(sym.name.starts_with(prefix));
+
+  this->syms.push_back(&sym);
+
+  Subsection<E> *subsec = add_string(ctx, "__TEXT", "__objc_methname",
+                                     sym.name.substr(prefix.size()));
+  ctx.objc_stubs->methnames.push_back(subsec);
+  ctx.objc_stubs->hdr.size =
+    ctx.objc_stubs->methnames.size() * ObjcStubsSection<E>::ENTRY_SIZE;
+
+  ctx.objc_selrefs->hdr.size += word_size;
+}
+
+template <typename E>
+Subsection<E> *
+ObjectFile<E>::add_string(Context<E> &ctx, std::string_view seg,
+                          std::string_view sect, std::string_view contents) {
+  assert(this == ctx.internal_obj);
+  assert(contents[contents.size()] == '\0');
+
+  u64 addr = 0;
+  if (!sections.empty()) {
+    const MachSection &hdr = sections.back()->hdr;
+    addr = hdr.addr + hdr.size;
+  }
+
+  // Create a dummy Mach-O section
+  MachSection *msec = new MachSection;
+  mach_sec_pool.emplace_back(msec);
+
+  memset(msec, 0, sizeof(*msec));
+  msec->set_segname(seg);
+  msec->set_sectname(sect);
+  msec->addr = addr;
+  msec->size = contents.size() + 1;
+  msec->type = S_CSTRING_LITERALS;
+
+  // Create a dummy InputSection
+  InputSection<E> *isec = new InputSection<E>(ctx, *this, *msec, sections.size());
+  sections.emplace_back(isec);
+  isec->contents = contents;
+
+  Subsection<E> *subsec = new Subsection<E>{
+    .isec = *isec,
+    .input_offset = 0,
+    .input_size = (u32)contents.size() + 1,
+    .input_addr = (u32)addr,
+    .p2align = 0,
+    .is_cstring = true,
+  };
+
+  subsec_pool.emplace_back(subsec);
+  subsections.push_back(subsec);
+  return subsec;
+}
+
+template <typename E>
 DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
   : InputFile<E>(mf) {
   this->is_dylib = true;

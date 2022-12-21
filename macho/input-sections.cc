@@ -26,7 +26,7 @@ template <typename E>
 InputSection<E>::InputSection(Context<E> &ctx, ObjectFile<E> &file,
                               const MachSection &hdr, u32 secidx)
   : file(file), hdr(hdr), secidx(secidx), osec(get_output_section(ctx, hdr)) {
-  if (hdr.type != S_ZEROFILL)
+  if (hdr.type != S_ZEROFILL && &file != ctx.internal_obj)
     contents = file.mf->get_contents().substr(hdr.offset, hdr.size);
 }
 
