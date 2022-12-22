@@ -340,11 +340,7 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
   // We synthesize `_objc_msgSend$foo` in the `__objc_stubs` section
   // if such symbol is missing.
   if (!syms.empty()) {
-    if (find_section(ctx, "__TEXT", "__objc_selrefs"))
-      Fatal(ctx) << "__objc_selrefs already exists";
-
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
-    ctx.objc_selrefs.reset(new ObjcSelrefsSection<E>(ctx));
 
     tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
       return a->name < b->name;
@@ -419,6 +415,7 @@ static void create_synthetic_chunks(Context<E> &ctx) {
     sort(seg->chunks, compare_chunks<E>);
 }
 
+// Split S_CSTRING_LITERALS subsections by contents.
 template <typename E>
 static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
   Timer t(ctx, "uniquify_cstrings");
@@ -487,13 +484,58 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
   });
 }
 
+// Merge S_LITERAL_POINTERS subsections such as __DATA,__objc_selrefs
+// by contents.
+//
+// Each S_LITERAL_POINTERS subsection is 8 bytes long and contains a
+// single relocation record. We merge two subsections if they contain
+// the same relcoation.
 template <typename E>
-static void merge_cstring_sections(Context<E> &ctx) {
-  Timer t(ctx, "merge_cstring_sections");
+static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
+  Timer t(ctx, "uniquify_literal_pointers");
 
-  for (Chunk<E> *chunk : ctx.chunks)
-    if (chunk->is_output_section && chunk->hdr.type == S_CSTRING_LITERALS)
-      uniquify_cstrings(ctx, *(OutputSection<E> *)chunk);
+  auto get_target = [](Relocation<E> &r) -> Subsection<E> * {
+    if (r.sym) {
+      if (r.sym->subsec)
+        return r.sym->subsec;
+      return nullptr;
+    }
+    return r.subsec;
+  };
+
+  std::unordered_map<Subsection<E> *, Subsection<E> *> map;
+
+  for (Subsection<E> *subsec : osec.members) {
+    assert(subsec->input_size == word_size);
+    std::span<Relocation<E>> rels = subsec->get_rels();
+
+    if (rels.size() == 1) {
+      Subsection<E> *target = get_target(rels[0]);
+      auto [it, inserted] = map.insert({target, subsec});
+      if (!inserted) {
+        subsec->is_coalesced = true;
+        subsec->replacer = it->second;
+      }
+    }
+  }
+}
+
+template <typename E>
+static void merge_mergeable_sections(Context<E> &ctx) {
+  Timer t(ctx, "merge_mergeable_sections");
+
+  for (Chunk<E> *chunk : ctx.chunks) {
+    if (chunk->is_output_section) {
+      switch (chunk->hdr.type) {
+      case S_CSTRING_LITERALS:
+        uniquify_cstrings(ctx, *(OutputSection<E> *)chunk);
+        break;
+      case S_LITERAL_POINTERS:
+        uniquify_literal_pointers(ctx, *(OutputSection<E> *)chunk);
+        break;
+      }
+    }
+  }
 
   // Rewrite relocations and symbols.
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
@@ -1098,7 +1140,7 @@ int macho_main(int argc, char **argv) {
     dead_strip(ctx);
 
   create_synthetic_chunks(ctx);
-  merge_cstring_sections(ctx);
+  merge_mergeable_sections(ctx);
 
   for (ObjectFile<E> *file : ctx.objs)
     file->check_duplicate_symbols(ctx);

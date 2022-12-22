@@ -75,6 +75,7 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
     init_subsections(ctx);
 
   split_cstring_literals(ctx);
+  split_literal_pointers(ctx);
 
   sort(subsections, [](Subsection<E> *a, Subsection<E> *b) {
     return a->input_addr < b->input_addr;
@@ -343,6 +344,30 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
         subsec_pool.emplace_back(subsec);
         subsections.push_back(subsec);
         pos = end;
+      }
+    }
+  }
+}
+
+// Split S_LITERAL_POINTERS sections such as __DATA,__objc_selrefs.
+template <typename E>
+void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
+  for (std::unique_ptr<InputSection<E>> &isec : sections) {
+    if (isec && isec->hdr.type == S_LITERAL_POINTERS) {
+      std::string_view str = isec->contents;
+      assert(str.size() % word_size == 0);
+
+      for (size_t pos = 0; pos < str.size(); pos += word_size) {
+        Subsection<E> *subsec = new Subsection<E>{
+          .isec = *isec,
+          .input_offset = (u32)pos,
+          .input_size = word_size,
+          .input_addr = (u32)(isec->hdr.addr + pos),
+          .p2align = word_size,
+        };
+
+        subsec_pool.emplace_back(subsec);
+        subsections.push_back(subsec);
       }
     }
   }
@@ -814,19 +839,15 @@ void ObjectFile<E>::add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym) {
 
   this->syms.push_back(&sym);
 
-  Subsection<E> *subsec = add_string(ctx, "__TEXT", "__objc_methname",
-                                     sym.name.substr(prefix.size()));
+  Subsection<E> *subsec = add_methname_string(ctx, sym.name.substr(prefix.size()));
   ctx.objc_stubs->methnames.push_back(subsec);
-  ctx.objc_stubs->hdr.size =
-    ctx.objc_stubs->methnames.size() * ObjcStubsSection<E>::ENTRY_SIZE;
-
-  ctx.objc_selrefs->hdr.size += word_size;
+  ctx.objc_stubs->selrefs.push_back(add_selrefs(ctx, *subsec));
+  ctx.objc_stubs->hdr.size += ObjcStubsSection<E>::ENTRY_SIZE;
 }
 
 template <typename E>
 Subsection<E> *
-ObjectFile<E>::add_string(Context<E> &ctx, std::string_view seg,
-                          std::string_view sect, std::string_view contents) {
+ObjectFile<E>::add_methname_string(Context<E> &ctx, std::string_view contents) {
   assert(this == ctx.internal_obj);
   assert(contents[contents.size()] == '\0');
 
@@ -841,8 +862,8 @@ ObjectFile<E>::add_string(Context<E> &ctx, std::string_view seg,
   mach_sec_pool.emplace_back(msec);
 
   memset(msec, 0, sizeof(*msec));
-  msec->set_segname(seg);
-  msec->set_sectname(sect);
+  msec->set_segname("__TEXT");
+  msec->set_sectname("__objc_methname");
   msec->addr = addr;
   msec->size = contents.size() + 1;
   msec->type = S_CSTRING_LITERALS;
@@ -858,6 +879,52 @@ ObjectFile<E>::add_string(Context<E> &ctx, std::string_view seg,
     .input_size = (u32)contents.size() + 1,
     .input_addr = (u32)addr,
     .p2align = 0,
+  };
+
+  subsec_pool.emplace_back(subsec);
+  subsections.push_back(subsec);
+  return subsec;
+}
+
+template <typename E>
+Subsection<E> *
+ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
+  assert(this == ctx.internal_obj);
+
+  // Create a dummy Mach-O section
+  MachSection *msec = new MachSection;
+  mach_sec_pool.emplace_back(msec);
+
+  memset(msec, 0, sizeof(*msec));
+  msec->set_segname("__DATA");
+  msec->set_sectname("__objc_selrefs");
+  msec->addr = sections.back()->hdr.addr + sections.back()->hdr.size,
+  msec->size = word_size;
+  msec->type = S_LITERAL_POINTERS;
+  msec->attr = S_ATTR_NO_DEAD_STRIP;
+
+  // Create a dummy InputSection
+  InputSection<E> *isec = new InputSection<E>(ctx, *this, *msec, sections.size());
+  sections.emplace_back(isec);
+  isec->contents = "\0\0\0\0\0\0\0\0"sv;
+
+  // Create a dummy relocation
+  isec->rels.push_back(Relocation<E>{
+    .offset = 0,
+    .type = E::abs_rel,
+    .p2size = std::countr_zero(word_size),
+    .subsec = &methname,
+  });
+
+  // Create a dummy subsection
+  Subsection<E> *subsec = new Subsection<E>{
+    .isec = *isec,
+    .input_offset = 0,
+    .input_size = word_size,
+    .input_addr = (u32)msec->addr,
+    .rel_offset = 0,
+    .nrels = 1,
+    .p2align = std::countr_zero(word_size),
   };
 
   subsec_pool.emplace_back(subsec);

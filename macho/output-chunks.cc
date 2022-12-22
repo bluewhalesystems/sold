@@ -660,11 +660,6 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
       enc.add(ctx.data_seg->seg_idx,
               sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
 
-  if (ctx.objc_stubs)
-    for (i64 i = 0; i < ctx.objc_stubs->methnames.size(); i++)
-      enc.add(ctx.data_seg->seg_idx,
-              ctx.objc_selrefs->hdr.addr + i * word_size - ctx.data_seg->cmd.vmaddr);
-
   auto refers_tls = [](Symbol<E> *sym) {
     if (sym && sym->subsec) {
       auto ty = sym->subsec->isec.osec.hdr.type;
@@ -1253,13 +1248,6 @@ void ObjcImageInfoSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template <typename E>
-void ObjcSelrefsSection<E>::copy_buf(Context<E> &ctx) {
-  ul64 *buf = (ul64 *)(ctx.buf + this->hdr.offset);
-  for (Subsection<E> *subsec : ctx.objc_stubs->methnames)
-    *buf++ = subsec->get_addr(ctx);
-}
-
-template <typename E>
 void CodeSignatureSection<E>::compute_size(Context<E> &ctx) {
   std::string filename = filepath(ctx.arg.final_output).filename().string();
   i64 filename_size = align_to(filename.size() + 1, 16);
@@ -1667,7 +1655,6 @@ template class FunctionStartsSection<E>;
 template class SymtabSection<E>;
 template class StrtabSection<E>;
 template class ObjcStubsSection<E>;
-template class ObjcSelrefsSection<E>;
 template class CodeSignatureSection<E>;
 template class ObjcImageInfoSection<E>;
 template class DataInCodeSection<E>;

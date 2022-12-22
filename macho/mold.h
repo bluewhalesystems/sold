@@ -140,14 +140,16 @@ private:
   void split_subsections_via_symbols(Context<E> &ctx);
   void init_subsections(Context<E> &ctx);
   void split_cstring_literals(Context<E> &ctx);
+  void split_literal_pointers(Context<E> &ctx);
   void fix_subsec_members(Context<E> &ctx);
   void parse_data_in_code(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   InputSection<E> *get_common_sec(Context<E> &ctx);
   void parse_lto_symbols(Context<E> &ctx);
 
-  Subsection<E> *add_string(Context<E> &ctx, std::string_view seg,
-                            std::string_view sect, std::string_view contents);
+  // For ther internal file
+  Subsection<E> *add_methname_string(Context<E> &ctx, std::string_view contents);
+  Subsection<E> *add_selrefs(Context<E> &ctx, Subsection<E> &methname);
 
   MachSection *unwind_sec = nullptr;
   std::unique_ptr<MachSection> common_hdr;
@@ -626,21 +628,9 @@ public:
   void copy_buf(Context<E> &ctx) override;
 
   std::vector<Subsection<E> *> methnames;
+  std::vector<Subsection<E> *> selrefs;
 
   static constexpr i64 ENTRY_SIZE = std::is_same_v<E, ARM64> ? 32 : 16;
-};
-
-template <typename E>
-class ObjcSelrefsSection : public Chunk<E> {
-public:
-  ObjcSelrefsSection(Context<E> &ctx)
-    : Chunk<E>(ctx, "__DATA", "__objc_selrefs") {
-    this->hdr.p2align = 3;
-    this->hdr.type = S_LITERAL_POINTERS;
-    this->hdr.attr = S_ATTR_NO_DEAD_STRIP;
-  }
-
-  void copy_buf(Context<E> &ctx) override;
 };
 
 template <typename E>
@@ -1012,7 +1002,6 @@ struct Context {
   std::unique_ptr<ObjcImageInfoSection<E>> image_info;
   std::unique_ptr<CodeSignatureSection<E>> code_sig;
   std::unique_ptr<ObjcStubsSection<E>> objc_stubs;
-  std::unique_ptr<ObjcSelrefsSection<E>> objc_selrefs;
 
   OutputSection<E> *text = nullptr;
   OutputSection<E> *data = nullptr;
