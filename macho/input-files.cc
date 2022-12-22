@@ -272,7 +272,6 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
           .input_size = r.size,
           .input_addr = (u32)(isec.hdr.addr + r.offset),
           .p2align = (u8)isec.hdr.p2align,
-          .is_cstring = false,
         };
 
         subsec_pool.emplace_back(subsec);
@@ -339,7 +338,6 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
           .input_size = (u32)(end - pos),
           .input_addr = (u32)(isec->hdr.addr + pos),
           .p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos)),
-          .is_cstring = true,
         };
 
         subsec_pool.emplace_back(subsec);
@@ -860,7 +858,6 @@ ObjectFile<E>::add_string(Context<E> &ctx, std::string_view seg,
     .input_size = (u32)contents.size() + 1,
     .input_addr = (u32)addr,
     .p2align = 0,
-    .is_cstring = true,
   };
 
   subsec_pool.emplace_back(subsec);

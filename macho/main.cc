@@ -446,7 +446,7 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
 
   tbb::parallel_for((i64)0, (i64)osec.members.size(), [&](i64 i) {
     Subsection<E> *subsec = osec.members[i];
-    if (subsec->is_cstring) {
+    if (subsec->isec.hdr.type == S_CSTRING_LITERALS) {
       u64 h = hash_string(subsec->get_contents());
       vec[i].subsec = subsec;
       vec[i].hash = h;
