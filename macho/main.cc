@@ -472,15 +472,13 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
 
   // Decide who will become the owner for each subsection.
   tbb::parallel_for_each(vec, [&](SubsecRef &ref) {
-    if (ref.subsec && ref.subsec != ref.ent->owner) {
-      ref.subsec->is_coalesced = true;
+    if (ref.subsec && ref.subsec != ref.ent->owner)
       ref.subsec->replacer = ref.ent->owner;
-    }
   });
 
   static Counter counter("num_merged_strings");
   counter += std::erase_if(osec.members, [](Subsection<E> *subsec) {
-    return subsec->is_coalesced;
+    return subsec->replacer;
   });
 }
 
@@ -512,10 +510,8 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
     if (rels.size() == 1) {
       Subsection<E> *target = get_target(rels[0]);
       auto [it, inserted] = map.insert({target, subsec});
-      if (!inserted) {
-        subsec->is_coalesced = true;
+      if (!inserted)
         subsec->replacer = it->second;
-      }
     }
   }
 }
@@ -542,7 +538,7 @@ static void merge_mergeable_sections(Context<E> &ctx) {
     for (std::unique_ptr<InputSection<E>> &isec : file->sections)
       if (isec)
         for (Relocation<E> &r : isec->rels)
-          if (r.subsec && r.subsec->is_coalesced)
+          if (r.subsec && r.subsec->replacer)
             r.subsec = r.subsec->replacer;
   });
 
@@ -552,12 +548,12 @@ static void merge_mergeable_sections(Context<E> &ctx) {
 
   for (InputFile<E> *file: files)
     for (Symbol<E> *sym : file->syms)
-      if (sym && sym->subsec && sym->subsec->is_coalesced)
+      if (sym && sym->subsec && sym->subsec->replacer)
         sym->subsec = sym->subsec->replacer;
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->subsections, [](Subsection<E> *subsec) {
-      return subsec->is_coalesced;
+      return subsec->replacer;
     });
   });
 }

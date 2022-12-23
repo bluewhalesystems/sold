@@ -245,11 +245,12 @@ public:
   u32 nrels = 0;
   u32 unwind_offset = 0;
   u32 nunwind = 0;
-  Subsection<E> *replacer = nullptr; // Used if is_coalesced is true
+
+  // Refers another subsection If this subsection is merged with it
+  Subsection<E> *replacer = nullptr;
 
   std::atomic_uint8_t p2align = 0;
   std::atomic_bool is_alive = true;
-  bool is_coalesced : 1 = false;
   bool added_to_osec : 1 = false;
 };
 
