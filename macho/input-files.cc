@@ -187,7 +187,8 @@ split_regular_sections(Context<E> &ctx, ObjectFile<E> &file) {
 
   for (i64 i = 0; i < file.sections.size(); i++)
     if (InputSection<E> *isec = file.sections[i].get())
-      if (isec->hdr.type != S_CSTRING_LITERALS)
+      if (isec->hdr.type != S_CSTRING_LITERALS &&
+          isec->hdr.type != S_LITERAL_POINTERS)
         vec[i].isec = isec;
 
   // Find all symbols whose type is N_SECT.
@@ -363,7 +364,7 @@ void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
           .input_offset = (u32)pos,
           .input_size = word_size,
           .input_addr = (u32)(isec->hdr.addr + pos),
-          .p2align = word_size,
+          .p2align = (u8)std::countr_zero(word_size),
         };
 
         subsec_pool.emplace_back(subsec);
