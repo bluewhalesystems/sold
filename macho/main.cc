@@ -493,12 +493,10 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
   Timer t(ctx, "uniquify_literal_pointers");
 
   auto get_target = [](Relocation<E> &r) -> Subsection<E> * {
-    if (r.sym) {
-      if (r.sym->subsec)
-        return r.sym->subsec;
+    Subsection<E> *subsec = r.sym ? r.sym->subsec : r.subsec;
+    if (!subsec)
       return nullptr;
-    }
-    return r.subsec;
+    return subsec->replacer ? subsec->replacer : subsec;
   };
 
   std::unordered_map<Subsection<E> *, Subsection<E> *> map;
@@ -508,10 +506,11 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
     std::span<Relocation<E>> rels = subsec->get_rels();
 
     if (rels.size() == 1) {
-      Subsection<E> *target = get_target(rels[0]);
-      auto [it, inserted] = map.insert({target, subsec});
-      if (!inserted)
-        subsec->replacer = it->second;
+      if (Subsection<E> *target = get_target(rels[0])) {
+        auto [it, inserted] = map.insert({target, subsec});
+        if (!inserted)
+          subsec->replacer = it->second;
+      }
     }
   }
 }
