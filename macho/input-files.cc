@@ -912,7 +912,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
   isec->rels.push_back(Relocation<E>{
     .offset = 0,
     .type = E::abs_rel,
-    .p2size = std::countr_zero(word_size),
+    .p2size = (u8)std::countr_zero(word_size),
     .subsec = &methname,
   });
 
@@ -924,7 +924,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
     .input_addr = (u32)msec->addr,
     .rel_offset = 0,
     .nrels = 1,
-    .p2align = std::countr_zero(word_size),
+    .p2align = (u8)std::countr_zero(word_size),
   };
 
   subsec_pool.emplace_back(subsec);
