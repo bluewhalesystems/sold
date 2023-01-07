@@ -78,6 +78,7 @@ struct SectionFragment {
 // don't need them and we allocate tens of millions of symbol objects
 // for large programs, we separate them from `Symbol` class to save
 // memory.
+template <typename E>
 struct SymbolAux {
   i32 got_idx = -1;
   i32 gottp_idx = -1;
@@ -85,9 +86,13 @@ struct SymbolAux {
   i32 tlsdesc_idx = -1;
   i32 plt_idx = -1;
   i32 pltgot_idx = -1;
-  i32 opd_idx = -1;
   i32 dynsym_idx = -1;
   u32 djb_hash = 0;
+};
+
+template <>
+struct SymbolAux<PPC64V1> : SymbolAux<X86_64> {
+  i32 opd_idx = -1;
 };
 
 //
@@ -257,8 +262,8 @@ public:
   const ElfShdr<E> &shdr() const;
   std::span<ElfRel<E>> get_rels(Context<E> &ctx) const;
   std::span<FdeRecord<E>> get_fdes() const;
-  std::string_view get_func_name(Context<E> &ctx, i64 offset);
-  bool is_relr_reloc(Context<E> &ctx, const ElfRel<E> &rel);
+  std::string_view get_func_name(Context<E> &ctx, i64 offset) const;
+  bool is_relr_reloc(Context<E> &ctx, const ElfRel<E> &rel) const;
   bool is_killed_by_icf() const;
 
   void record_undef_error(Context<E> &ctx, const ElfRel<E> &rel);
@@ -317,6 +322,8 @@ private:
 
   std::pair<SectionFragment<E> *, i64>
   get_fragment(Context<E> &ctx, const ElfRel<E> &rel);
+
+  u64 get_thunk_addr(i64 idx);
 
   std::optional<u64> get_tombstone(Symbol<E> &sym, SectionFragment<E> *frag);
 };
@@ -475,18 +482,6 @@ public:
 };
 
 template <typename E>
-struct GotEntry {
-  bool is_relr(Context<E> &ctx) const {
-    return r_type == E::R_RELATIVE && ctx.arg.pack_dyn_relocs_relr;
-  }
-
-  i64 idx = 0;
-  u64 val = 0;
-  i64 r_type = R_NONE;
-  Symbol<E> *sym = nullptr;
-};
-
-template <typename E>
 class GotSection : public Chunk<E> {
 public:
   GotSection() {
@@ -523,9 +518,6 @@ public:
 
   void construct_relr(Context<E> &ctx);
   std::vector<u64> relr;
-
-private:
-  std::vector<GotEntry<E>> get_entries(Context<E> &ctx) const;
 };
 
 template <typename E>
@@ -533,7 +525,7 @@ class GotPltSection : public Chunk<E> {
 public:
   GotPltSection() {
     this->name = ".got.plt";
-    this->shdr.sh_type = is_ppc<E> ? SHT_NOBITS : SHT_PROGBITS;
+    this->shdr.sh_type = is_ppc64<E> ? SHT_NOBITS : SHT_PROGBITS;
     this->shdr.sh_flags = SHF_ALLOC | SHF_WRITE;
     this->shdr.sh_addralign = sizeof(Word<E>);
     this->shdr.sh_size = HDR_SIZE;
@@ -542,11 +534,8 @@ public:
   void update_shdr(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
 
-  static constexpr i64 HDR_SIZE =
-    (std::is_same_v<E, PPC64V2> ? 2 : 3) * sizeof(Word<E>);
-
-  static constexpr i64 ENTRY_SIZE =
-    (std::is_same_v<E, PPC64V1> ? 3 : 1) * sizeof(Word<E>);
+  static constexpr i64 HDR_SIZE = (is_ppc64v2<E> ? 2 : 3) * sizeof(Word<E>);
+  static constexpr i64 ENTRY_SIZE = (is_ppc64v1<E> ? 3 : 1) * sizeof(Word<E>);
 };
 
 template <typename E>
@@ -598,8 +587,8 @@ template <typename E>
 class RelPltSection : public Chunk<E> {
 public:
   RelPltSection() {
-    this->name = is_rela<E> ? ".rela.plt" : ".rel.plt";
-    this->shdr.sh_type = is_rela<E> ? SHT_RELA : SHT_REL;
+    this->name = E::is_rela ? ".rela.plt" : ".rel.plt";
+    this->shdr.sh_type = E::is_rela ? SHT_RELA : SHT_REL;
     this->shdr.sh_flags = SHF_ALLOC;
     this->shdr.sh_entsize = sizeof(ElfRel<E>);
     this->shdr.sh_addralign = sizeof(Word<E>);
@@ -613,8 +602,8 @@ template <typename E>
 class RelDynSection : public Chunk<E> {
 public:
   RelDynSection() {
-    this->name = is_rela<E> ? ".rela.dyn" : ".rel.dyn";
-    this->shdr.sh_type = is_rela<E> ? SHT_RELA : SHT_REL;
+    this->name = E::is_rela ? ".rela.dyn" : ".rel.dyn";
+    this->shdr.sh_type = E::is_rela ? SHT_RELA : SHT_REL;
     this->shdr.sh_flags = SHF_ALLOC;
     this->shdr.sh_entsize = sizeof(ElfRel<E>);
     this->shdr.sh_addralign = sizeof(Word<E>);
@@ -623,8 +612,6 @@ public:
   void update_shdr(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
   void sort(Context<E> &ctx);
-
-  i64 relcount = 0;
 };
 
 template <typename E>
@@ -846,8 +833,8 @@ template <typename E>
 class EhFrameRelocSection : public Chunk<E> {
 public:
   EhFrameRelocSection() {
-    this->name = is_rela<E> ? ".rela.eh_frame" : ".rel.eh_frame";
-    this->shdr.sh_type = is_rela<E> ? SHT_RELA : SHT_REL;
+    this->name = E::is_rela ? ".rela.eh_frame" : ".rel.eh_frame";
+    this->shdr.sh_type = E::is_rela ? SHT_RELA : SHT_REL;
     this->shdr.sh_flags = SHF_INFO_LINK;
     this->shdr.sh_addralign = sizeof(Word<E>);
     this->shdr.sh_entsize = sizeof(ElfRel<E>);
@@ -1258,6 +1245,7 @@ public:
 
   // For ICF
   std::unique_ptr<InputSection<E>> llvm_addrsig;
+
   // For .gdb_index
   InputSection<E> *debug_info = nullptr;
   InputSection<E> *debug_ranges = nullptr;
@@ -1273,6 +1261,9 @@ public:
   i64 names_offset = 0;
   i64 num_areas = 0;
   i64 area_offset = 0;
+
+  // For PPC32
+  InputSection<E> *ppc32_got2 = nullptr;
 
 private:
   ObjectFile(Context<E> &ctx, MappedFile<Context<E>> *mf,
@@ -1340,7 +1331,8 @@ template <typename E>
 void parse_linker_script(Context<E> &ctx, MappedFile<Context<E>> *mf);
 
 template <typename E>
-MachineType get_script_output_type(Context<E> &ctx, MappedFile<Context<E>> *mf);
+std::string_view
+get_script_output_type(Context<E> &ctx, MappedFile<Context<E>> *mf);
 
 template <typename E>
 void parse_version_script(Context<E> &ctx, MappedFile<Context<E>> *mf);
@@ -1426,6 +1418,7 @@ template <typename E> void print_dependencies(Context<E> &);
 template <typename E> void print_dependencies_full(Context<E> &);
 template <typename E> void write_repro_file(Context<E> &);
 template <typename E> void check_duplicate_symbols(Context<E> &);
+template <typename E> void check_symbol_types(Context<E> &);
 template <typename E> void sort_init_fini(Context<E> &);
 template <typename E> void sort_ctor_dtor(Context<E> &);
 template <typename E> void shuffle_sections(Context<E> &);
@@ -1521,6 +1514,38 @@ public:
 };
 
 //
+// arch-alpha.cc
+//
+
+class AlphaGotSection : public Chunk<ALPHA> {
+public:
+  AlphaGotSection() {
+    this->name = ".alpha_got";
+    this->shdr.sh_type = SHT_PROGBITS;
+    this->shdr.sh_flags = SHF_ALLOC | SHF_WRITE;
+    this->shdr.sh_addralign = 8;
+  }
+
+  void add_symbol(Symbol<ALPHA> &sym, i64 addend);
+  void finalize();
+  u64 get_addr(Symbol<ALPHA> &sym, i64 addend);
+  i64 get_reldyn_size(Context<ALPHA> &ctx);
+  void copy_buf(Context<ALPHA> &ctx) override;
+
+  struct Entry {
+    bool operator==(const Entry &) const = default;
+    Symbol<ALPHA> *sym;
+    i64 addend;
+  };
+
+  i64 reldyn_offset = 0;
+
+private:
+  std::vector<Entry> entries;
+  std::mutex mu;
+};
+
+//
 // main.cc
 //
 
@@ -1570,6 +1595,34 @@ struct SectionOrder {
   enum { NONE, SECTION, GROUP, ADDR, ALIGN, SYMBOL } type = NONE;
   std::string name;
   u64 value = 0;
+};
+
+// Target-specific context clss
+template <typename E> struct ContextExtras {};
+
+template <> struct ContextExtras<PPC32> {
+  Symbol<PPC32> *_SDA_BASE_ = nullptr;
+};
+
+template <> struct ContextExtras<PPC64V1> {
+  PPC64OpdSection *opd = nullptr;
+  Symbol<PPC64V1> *TOC = nullptr;
+};
+
+template <> struct ContextExtras<PPC64V2> {
+  Symbol<PPC64V2> *TOC = nullptr;
+};
+
+template <> struct ContextExtras<SPARC64> {
+  SparcTlsGetAddrSection *tls_get_addr = nullptr;
+};
+
+template <> struct ContextExtras<S390X> {
+  S390XTlsGetOffsetSection *tls_get_offset = nullptr;
+};
+
+template <> struct ContextExtras<ALPHA> {
+  AlphaGotSection *got = nullptr;
 };
 
 // Context represents a context object for each invocation of the linker.
@@ -1652,6 +1705,7 @@ struct Context {
     bool z_delete = true;
     bool z_dlopen = true;
     bool z_dump = true;
+    bool z_dynamic_undefined_weak = true;
     bool z_execstack = false;
     bool z_execstack_if_needed = false;
     bool z_ibt = false;
@@ -1664,7 +1718,7 @@ struct Context {
     bool z_relro = true;
     bool z_shstk = false;
     bool z_text = false;
-    MachineType emulation = MachineType::NONE;
+    std::string_view emulation;
     i64 filler = -1;
     i64 print_dependencies = 0;
     i64 spare_dynamic_tags = 5;
@@ -1738,7 +1792,7 @@ struct Context {
   tbb::concurrent_vector<std::unique_ptr<OutputSection<E>>> osec_pool;
 
   // Symbol auxiliary data
-  std::vector<SymbolAux> symbol_aux;
+  std::vector<SymbolAux<E>> symbol_aux;
 
   // Fully-expanded command line args
   std::vector<std::string_view> cmdline_args;
@@ -1759,6 +1813,7 @@ struct Context {
   std::atomic_bool needs_tlsld = false;
   std::atomic_bool has_gottp_rel = false;
   std::atomic_bool has_textrel = false;
+  std::atomic_uint32_t num_ifunc_dynrels = 0;
 
   tbb::concurrent_hash_map<std::string_view, std::vector<std::string>> undef_errors;
 
@@ -1796,9 +1851,8 @@ struct Context {
   NotePropertySection<E> *note_property = nullptr;
   GdbIndexSection<E> *gdb_index = nullptr;
   RelroPaddingSection<E> *relro_padding = nullptr;
-  PPC64OpdSection *ppc64_opd = nullptr;
-  SparcTlsGetAddrSection *sparc_tls_get_addr = nullptr;
-  S390XTlsGetOffsetSection *s390x_tls_get_offset = nullptr;
+
+  [[no_unique_address]] ContextExtras<E> extra;
 
   // Frequently accessed symbols
   Symbol<E> *tls_get_addr = nullptr;
@@ -1817,7 +1871,6 @@ struct Context {
   u64 dtp_addr = 0;
 
   // Linker-synthesized symbols
-  Symbol<E> *TOC = nullptr;
   Symbol<E> *_DYNAMIC = nullptr;
   Symbol<E> *_GLOBAL_OFFSET_TABLE_ = nullptr;
   Symbol<E> *_PROCEDURE_LINKAGE_TABLE_ = nullptr;
@@ -1847,7 +1900,7 @@ struct Context {
 };
 
 template <typename E>
-MachineType get_machine_type(Context<E> &ctx, MappedFile<Context<E>> *mf);
+std::string_view get_machine_type(Context<E> &ctx, MappedFile<Context<E>> *mf);
 
 template <typename E>
 MappedFile<Context<E>> *open_library(Context<E> &ctx, std::string path);
@@ -1871,14 +1924,15 @@ std::ostream &operator<<(std::ostream &out, const InputFile<E> &file);
 //
 
 enum {
-  NEEDS_GOT     = 1 << 0,
-  NEEDS_PLT     = 1 << 1,
-  NEEDS_CPLT    = 1 << 2,
-  NEEDS_GOTTP   = 1 << 3,
-  NEEDS_TLSGD   = 1 << 4,
-  NEEDS_COPYREL = 1 << 5,
-  NEEDS_TLSDESC = 1 << 6,
-  NEEDS_OPD     = 1 << 7,
+  NEEDS_GOT       = 1 << 0,
+  NEEDS_PLT       = 1 << 1,
+  NEEDS_CPLT      = 1 << 2,
+  NEEDS_GOTTP     = 1 << 3,
+  NEEDS_TLSGD     = 1 << 4,
+  NEEDS_COPYREL   = 1 << 5,
+  NEEDS_TLSDESC   = 1 << 6,
+  NEEDS_PPC_OPD   = 1 << 7, // for PPCv1
+  NEEDS_ALPHA_GOT = 1 << 7, // for Alpha
 };
 
 // A struct to hold target-dependent symbol members.
@@ -2012,8 +2066,8 @@ public:
 
   bool is_weak : 1 = false;
   bool write_to_symtab : 1 = false; // for --strip-all and the like
-  bool traced : 1 = false;          // for --trace-symbol
-  bool wrap : 1 = false;            // for --wrap
+  bool is_traced : 1 = false;       // for --trace-symbol
+  bool is_wrapped : 1 = false;      // for --wrap
 
   // If a symbol can be resolved to a symbol in a different ELF file at
   // runtime, `is_imported` is true. If a symbol is a dynamic symbol and
@@ -2213,107 +2267,15 @@ inline i64 InputSection<E>::get_priority() const {
 }
 
 template <typename E>
+i64 get_addend(u8 *loc, const ElfRel<E> &rel);
+
+template <typename E> requires E::is_rela && (!is_sh4<E>)
 inline i64 get_addend(u8 *loc, const ElfRel<E> &rel) {
   return rel.r_addend;
 }
 
-template <>
-inline i64 get_addend(u8 *loc, const ElfRel<I386> &rel) {
-  switch (rel.r_type) {
-  case R_386_NONE:
-    return 0;
-  case R_386_8:
-  case R_386_PC8:
-    return *loc;
-  case R_386_16:
-  case R_386_PC16:
-    return *(ul16 *)loc;
-  case R_386_32:
-  case R_386_PC32:
-  case R_386_GOT32:
-  case R_386_GOT32X:
-  case R_386_PLT32:
-  case R_386_GOTOFF:
-  case R_386_GOTPC:
-  case R_386_TLS_LDM:
-  case R_386_TLS_GOTIE:
-  case R_386_TLS_LE:
-  case R_386_TLS_IE:
-  case R_386_TLS_GD:
-  case R_386_TLS_LDO_32:
-  case R_386_SIZE32:
-  case R_386_TLS_GOTDESC:
-    return *(ul32 *)loc;
-  }
-  unreachable();
-}
-
-template <>
-inline i64 get_addend(u8 *loc, const ElfRel<ARM32> &rel) {
-  switch (rel.r_type) {
-  case R_ARM_NONE:
-    return 0;
-  case R_ARM_ABS32:
-  case R_ARM_REL32:
-  case R_ARM_TARGET1:
-  case R_ARM_BASE_PREL:
-  case R_ARM_GOTOFF32:
-  case R_ARM_GOT_PREL:
-  case R_ARM_GOT_BREL:
-  case R_ARM_TLS_GD32:
-  case R_ARM_TLS_LDM32:
-  case R_ARM_TLS_LDO32:
-  case R_ARM_TLS_IE32:
-  case R_ARM_TLS_LE32:
-  case R_ARM_TLS_GOTDESC:
-  case R_ARM_TARGET2:
-    return *(il32 *)loc;
-  case R_ARM_THM_JUMP11:
-    return sign_extend(*(ul16 *)loc, 10) << 1;
-  case R_ARM_THM_CALL:
-  case R_ARM_THM_JUMP24:
-  case R_ARM_THM_TLS_CALL: {
-    u32 S = bit(*(ul16 *)loc, 10);
-    u32 J1 = bit(*(ul16 *)(loc + 2), 13);
-    u32 J2 = bit(*(ul16 *)(loc + 2), 11);
-    u32 I1 = !(J1 ^ S);
-    u32 I2 = !(J2 ^ S);
-    u32 imm10 = bits(*(ul16 *)loc, 9, 0);
-    u32 imm11 = bits(*(ul16 *)(loc + 2), 10, 0);
-    u32 val = (S << 24) | (I1 << 23) | (I2 << 22) | (imm10 << 12) | (imm11 << 1);
-    return sign_extend(val, 24);
-  }
-  case R_ARM_CALL:
-  case R_ARM_JUMP24:
-    return sign_extend(*(ul32 *)loc & 0x00ff'ffff, 23) << 2;
-  case R_ARM_MOVW_PREL_NC:
-  case R_ARM_MOVW_ABS_NC:
-  case R_ARM_MOVT_PREL:
-  case R_ARM_MOVT_ABS: {
-    u32 imm12 = bits(*(ul32 *)loc, 11, 0);
-    u32 imm4 = bits(*(ul32 *)loc, 19, 16);
-    return sign_extend((imm4 << 12) | imm12, 15);
-  }
-  case R_ARM_PREL31:
-    return sign_extend(*(ul32 *)loc, 30);
-  case R_ARM_THM_MOVW_PREL_NC:
-  case R_ARM_THM_MOVW_ABS_NC:
-  case R_ARM_THM_MOVT_PREL:
-  case R_ARM_THM_MOVT_ABS: {
-    u32 imm4 = bits(*(ul16 *)loc, 3, 0);
-    u32 i = bit(*(ul16 *)loc, 10);
-    u32 imm3 = bits(*(ul16 *)(loc + 2), 14, 12);
-    u32 imm8 = bits(*(ul16 *)(loc + 2), 7, 0);
-    u32 val = (imm4 << 12) | (i << 11) | (imm3 << 8) | imm8;
-    return sign_extend(val, 15);
-  }
-  default:
-    unreachable();
-  }
-}
-
 template <typename E>
-inline i64 get_addend(InputSection<E> &isec, const ElfRel<E> &rel) {
+i64 get_addend(InputSection<E> &isec, const ElfRel<E> &rel) {
   return get_addend((u8 *)isec.contents.data() + rel.r_offset, rel);
 }
 
@@ -2356,6 +2318,16 @@ InputSection<E>::get_fragment(Context<E> &ctx, const ElfRel<E> &rel) {
   return {nullptr, 0};
 }
 
+template <typename E>
+u64 InputSection<E>::get_thunk_addr(i64 idx) {
+  if constexpr (needs_thunk<E>) {
+    RangeExtensionRef ref = extra.range_extn[idx];
+    assert(ref.thunk_idx != -1);
+    return output_section->thunks[ref.thunk_idx]->get_addr(ref.sym_idx);
+  }
+  unreachable();
+}
+
 // Input object files may contain duplicate code for inline functions
 // and such. Linkers de-duplicate them at link-time. However, linkers
 // generaly don't remove debug info for de-duplicated functions because
@@ -2395,7 +2367,8 @@ InputSection<E>::get_tombstone(Symbol<E> &sym, SectionFragment<E> *frag) {
 }
 
 template <typename E>
-inline bool InputSection<E>::is_relr_reloc(Context<E> &ctx, const ElfRel<E> &rel) {
+inline bool
+InputSection<E>::is_relr_reloc(Context<E> &ctx, const ElfRel<E> &rel) const {
   return ctx.arg.pack_dyn_relocs_relr &&
          !(shdr().sh_flags & SHF_EXECINSTR) &&
          (shdr().sh_addralign % sizeof(Word<E>)) == 0 &&
@@ -2474,7 +2447,7 @@ inline InputSection<E> *ObjectFile<E>::get_section(const ElfSym<E> &esym) {
 }
 
 template <typename E>
-inline u64 Symbol<E>::get_addr(Context<E> &ctx, i64 flags) const {
+u64 Symbol<E>::get_addr(Context<E> &ctx, i64 flags) const {
   if (SectionFragment<E> *frag = get_frag()) {
     if (!frag->is_alive) {
       // This condition is met if a non-alloc section refers an
@@ -2493,7 +2466,7 @@ inline u64 Symbol<E>::get_addr(Context<E> &ctx, i64 flags) const {
       : ctx.copyrel->shdr.sh_addr + value;
   }
 
-  if constexpr (std::is_same_v<E, PPC64V1>)
+  if constexpr (is_ppc64v1<E>)
     if (!(flags & NO_OPD) && has_opd(ctx))
       return get_opd_addr(ctx);
 
@@ -2583,7 +2556,7 @@ inline u64 Symbol<E>::get_plt_addr(Context<E> &ctx) const {
 template <typename E>
 inline u64 Symbol<E>::get_opd_addr(Context<E> &ctx) const {
   assert(get_opd_idx(ctx) != -1);
-  return ctx.ppc64_opd->shdr.sh_addr +
+  return ctx.extra.opd->shdr.sh_addr +
          get_opd_idx(ctx) * PPC64OpdSection::ENTRY_SIZE;
 }
 

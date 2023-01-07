@@ -39,6 +39,70 @@ namespace mold::elf {
 
 using E = ARM32;
 
+template <>
+i64 get_addend(u8 *loc, const ElfRel<E> &rel) {
+  switch (rel.r_type) {
+  case R_ARM_ABS32:
+  case R_ARM_REL32:
+  case R_ARM_TARGET1:
+  case R_ARM_BASE_PREL:
+  case R_ARM_GOTOFF32:
+  case R_ARM_GOT_PREL:
+  case R_ARM_GOT_BREL:
+  case R_ARM_TLS_GD32:
+  case R_ARM_TLS_LDM32:
+  case R_ARM_TLS_LDO32:
+  case R_ARM_TLS_IE32:
+  case R_ARM_TLS_LE32:
+  case R_ARM_TLS_GOTDESC:
+  case R_ARM_TARGET2:
+    return *(il32 *)loc;
+  case R_ARM_THM_JUMP11:
+    return sign_extend(*(ul16 *)loc, 10) << 1;
+  case R_ARM_THM_CALL:
+  case R_ARM_THM_JUMP24:
+  case R_ARM_THM_TLS_CALL: {
+    u32 S = bit(*(ul16 *)loc, 10);
+    u32 J1 = bit(*(ul16 *)(loc + 2), 13);
+    u32 J2 = bit(*(ul16 *)(loc + 2), 11);
+    u32 I1 = !(J1 ^ S);
+    u32 I2 = !(J2 ^ S);
+    u32 imm10 = bits(*(ul16 *)loc, 9, 0);
+    u32 imm11 = bits(*(ul16 *)(loc + 2), 10, 0);
+    u32 val = (S << 24) | (I1 << 23) | (I2 << 22) | (imm10 << 12) | (imm11 << 1);
+    return sign_extend(val, 24);
+  }
+  case R_ARM_CALL:
+  case R_ARM_JUMP24:
+  case R_ARM_PLT32:
+  case R_ARM_TLS_CALL:
+    return sign_extend(*(ul32 *)loc & 0x00ff'ffff, 23) << 2;
+  case R_ARM_MOVW_PREL_NC:
+  case R_ARM_MOVW_ABS_NC:
+  case R_ARM_MOVT_PREL:
+  case R_ARM_MOVT_ABS: {
+    u32 imm12 = bits(*(ul32 *)loc, 11, 0);
+    u32 imm4 = bits(*(ul32 *)loc, 19, 16);
+    return sign_extend((imm4 << 12) | imm12, 15);
+  }
+  case R_ARM_PREL31:
+    return sign_extend(*(ul32 *)loc, 30);
+  case R_ARM_THM_MOVW_PREL_NC:
+  case R_ARM_THM_MOVW_ABS_NC:
+  case R_ARM_THM_MOVT_PREL:
+  case R_ARM_THM_MOVT_ABS: {
+    u32 imm4 = bits(*(ul16 *)loc, 3, 0);
+    u32 i = bit(*(ul16 *)loc, 10);
+    u32 imm3 = bits(*(ul16 *)(loc + 2), 14, 12);
+    u32 imm8 = bits(*(ul16 *)(loc + 2), 7, 0);
+    u32 val = (imm4 << 12) | (i << 11) | (imm3 << 8) | imm8;
+    return sign_extend(val, 15);
+  }
+  default:
+    return 0;
+  }
+}
+
 static void write_mov_imm(u8 *loc, u32 val) {
   u32 imm12 = bits(val, 11, 0);
   u32 imm4 = bits(val, 15, 12);
@@ -70,6 +134,60 @@ static void write_thm_mov_imm(u8 *loc, u32 val) {
   ul16 *buf = (ul16 *)loc;
   buf[0] = (buf[0] & 0b1111'1011'1111'0000) | (i << 10) | imm4;
   buf[1] = (buf[1] & 0b1000'1111'0000'0000) | (imm3 << 12) | imm8;
+}
+
+template <>
+void write_addend(u8 *loc, i64 val, const ElfRel<E> &rel) {
+  switch (rel.r_type) {
+  case R_ARM_NONE:
+    break;
+  case R_ARM_ABS32:
+  case R_ARM_REL32:
+  case R_ARM_TARGET1:
+  case R_ARM_BASE_PREL:
+  case R_ARM_GOTOFF32:
+  case R_ARM_GOT_PREL:
+  case R_ARM_GOT_BREL:
+  case R_ARM_TLS_GD32:
+  case R_ARM_TLS_LDM32:
+  case R_ARM_TLS_LDO32:
+  case R_ARM_TLS_IE32:
+  case R_ARM_TLS_LE32:
+  case R_ARM_TLS_GOTDESC:
+  case R_ARM_TARGET2:
+    *(ul32 *)loc = val;
+    break;
+  case R_ARM_THM_JUMP11:
+    *(ul16 *)loc = (*(ul16 *)loc & 0xf800) | bits(val, 11, 1);
+    break;
+  case R_ARM_THM_CALL:
+  case R_ARM_THM_JUMP24:
+  case R_ARM_THM_TLS_CALL:
+    write_thm_b_imm(loc, val);
+    break;
+  case R_ARM_CALL:
+  case R_ARM_JUMP24:
+  case R_ARM_PLT32:
+    *(ul32 *)loc = (*(ul32 *)loc & 0xff00'0000) | bits(val, 25, 2);
+    break;
+  case R_ARM_MOVW_PREL_NC:
+  case R_ARM_MOVW_ABS_NC:
+  case R_ARM_MOVT_PREL:
+  case R_ARM_MOVT_ABS:
+    write_mov_imm(loc, val);
+    break;
+  case R_ARM_PREL31:
+    *(ul32 *)loc = (*(ul32 *)loc & 0x8000'0000) | (val & 0x7fff'ffff);
+    break;
+  case R_ARM_THM_MOVW_PREL_NC:
+  case R_ARM_THM_MOVW_ABS_NC:
+  case R_ARM_THM_MOVT_PREL:
+  case R_ARM_THM_MOVT_ABS:
+    write_thm_mov_imm(loc, val);
+    break;
+  default:
+    unreachable();
+  }
 }
 
 template <>
@@ -114,59 +232,6 @@ template <>
 void EhFrameSection<E>::apply_reloc(Context<E> &ctx, const ElfRel<E> &rel,
                                     u64 offset, u64 val) {}
 
-template <>
-void write_addend(u8 *loc, i64 val, const ElfRel<E> &rel) {
-  switch (rel.r_type) {
-  case R_ARM_NONE:
-    break;
-  case R_ARM_ABS32:
-  case R_ARM_REL32:
-  case R_ARM_TARGET1:
-  case R_ARM_BASE_PREL:
-  case R_ARM_GOTOFF32:
-  case R_ARM_GOT_PREL:
-  case R_ARM_GOT_BREL:
-  case R_ARM_TLS_GD32:
-  case R_ARM_TLS_LDM32:
-  case R_ARM_TLS_LDO32:
-  case R_ARM_TLS_IE32:
-  case R_ARM_TLS_LE32:
-  case R_ARM_TLS_GOTDESC:
-  case R_ARM_TARGET2:
-    *(ul32 *)loc = val;
-    break;
-  case R_ARM_THM_JUMP11:
-    *(ul16 *)loc = (*(ul16 *)loc & 0xf800) | bits(val, 11, 1);
-    break;
-  case R_ARM_THM_CALL:
-  case R_ARM_THM_JUMP24:
-  case R_ARM_THM_TLS_CALL:
-    write_thm_b_imm(loc, val);
-    break;
-  case R_ARM_CALL:
-  case R_ARM_JUMP24:
-    *(ul32 *)loc = (*(ul32 *)loc & 0xff00'0000) | bits(val, 25, 2);
-    break;
-  case R_ARM_MOVW_PREL_NC:
-  case R_ARM_MOVW_ABS_NC:
-  case R_ARM_MOVT_PREL:
-  case R_ARM_MOVT_ABS:
-    write_mov_imm(loc, val);
-    break;
-  case R_ARM_PREL31:
-    *(ul32 *)loc = (*(ul32 *)loc & 0x8000'0000) | (val & 0x7fff'ffff);
-    break;
-  case R_ARM_THM_MOVW_PREL_NC:
-  case R_ARM_THM_MOVW_ABS_NC:
-  case R_ARM_THM_MOVT_PREL:
-  case R_ARM_THM_MOVT_ABS:
-    write_thm_mov_imm(loc, val);
-    break;
-  default:
-    unreachable();
-  }
-}
-
 // ARM and Thumb branch instructions can jump within ±16 MiB.
 static bool is_jump_reachable(i64 val) {
   return sign_extend(val, 24) == val;
@@ -181,16 +246,17 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     dynrel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset +
                            file.reldyn_offset + this->reldyn_offset);
 
-  i64 trampoline_idx = 0;
+  std::span<std::unique_ptr<RangeExtensionThunk<E>>> thunks =
+    output_section->thunks;
 
   auto get_trampoline_addr = [&](u64 addr) {
-    for (; trampoline_idx < output_section->thunks.size(); trampoline_idx++) {
-      RangeExtensionThunk<E> &thunk = *output_section->thunks[trampoline_idx];
-      i64 disp = output_section->shdr.sh_addr + thunk.offset - addr;
+    for (;;) {
+      assert(!thunks.empty());
+      i64 disp = output_section->shdr.sh_addr + thunks[0]->offset - addr;
       if (is_jump_reachable(disp))
         return disp;
+      thunks = thunks.subspan(1);
     }
-    unreachable();
   };
 
   for (i64 i = 0; i < rels.size(); i++) {
@@ -208,24 +274,15 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
                    << lo << ", " << hi << ")";
     };
 
-#define S   sym.get_addr(ctx)
-#define A   get_addend(*this, rel)
-#define P   (get_addr() + rel.r_offset)
-#define T   (sym.get_addr(ctx) & 1)
-#define G   (sym.get_got_idx(ctx) * sizeof(Word<E>))
-#define GOT ctx.got->shdr.sh_addr
+    u64 S = sym.get_addr(ctx);
+    u64 A = get_addend(*this, rel);
+    u64 P = get_addr() + rel.r_offset;
+    u64 T = S & 1;
+    u64 G = sym.get_got_idx(ctx) * sizeof(Word<E>);
+    u64 GOT = ctx.got->shdr.sh_addr;
 
-    auto get_thumb_thunk_addr = [&] {
-      RangeExtensionRef ref = extra.range_extn[i];
-      assert(ref.thunk_idx != -1);
-      u64 addr = output_section->thunks[ref.thunk_idx]->get_addr(ref.sym_idx);
-      assert(is_jump_reachable(addr + A - P));
-      return addr;
-    };
-
-    auto get_arm_thunk_addr = [&] {
-      return get_thumb_thunk_addr() + 4;
-    };
+    auto get_thumb_thunk_addr = [&] { return get_thunk_addr(i); };
+    auto get_arm_thunk_addr   = [&] { return get_thunk_addr(i) + 4; };
 
     switch (rel.r_type) {
     case R_ARM_ABS32:
@@ -301,6 +358,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       break;
     }
     case R_ARM_JUMP24:
+    case R_ARM_PLT32:
       if (sym.is_remaining_undef_weak()) {
         *(ul32 *)loc = 0xe320'f000; // NOP
       } else {
@@ -314,13 +372,12 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         *(ul32 *)loc = (*(ul32 *)loc & 0xff00'0000) | bits(val, 25, 2);
       }
       break;
-    case R_ARM_THM_JUMP11: {
+    case R_ARM_THM_JUMP11:
       assert(T);
-      i64 val = S + A - P;
-      check(val, -(1 << 11), 1 << 11);
-      *(ul16 *)loc = (*(ul16 *)loc & 0xf800) | bits(val, 11, 1);
+      check(S + A - P, -(1 << 11), 1 << 11);
+      *(ul16 *)loc &= 0xf800;
+      *(ul16 *)loc |= bits(S + A - P, 11, 1);
       break;
-    }
     case R_ARM_THM_JUMP19: {
       i64 val = S + A - P;
       check(val, -(1 << 19), 1 << 19);
@@ -360,12 +417,11 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_ARM_THM_MOVW_PREL_NC:
       write_thm_mov_imm(loc, ((S + A) | T) - P);
       break;
-    case R_ARM_PREL31: {
-      i64 val = S + A - P;
-      check(val, -(1LL << 30), 1LL << 30);
-      *(ul32 *)loc = (*(ul32 *)loc & 0x8000'0000) | (val & 0x7fff'ffff);
+    case R_ARM_PREL31:
+      check(S + A - P, -(1LL << 30), 1LL << 30);
+      *(ul32 *)loc &= 0x8000'0000;
+      *(ul32 *)loc |= (S + A - P) & 0x7fff'ffff;
       break;
-    }
     case R_ARM_THM_MOVW_ABS_NC:
       write_thm_mov_imm(loc, (S + A) | T);
       break;
@@ -388,7 +444,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       *(ul32 *)loc = ctx.got->get_tlsld_addr(ctx) + A - P;
       break;
     case R_ARM_TLS_LDO32:
-      *(ul32 *)loc = S + A - ctx.tls_begin;
+      *(ul32 *)loc = S + A - ctx.dtp_addr;
       break;
     case R_ARM_TLS_IE32:
       *(ul32 *)loc = sym.get_gottp_addr(ctx) + A - P;
@@ -429,13 +485,6 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     default:
       Error(ctx) << *this << ": unknown relocation: " << rel;
     }
-
-#undef S
-#undef A
-#undef P
-#undef T
-#undef G
-#undef GOT
   }
 }
 
@@ -460,8 +509,8 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
     i64 frag_addend;
     std::tie(frag, frag_addend) = get_fragment(ctx, rel);
 
-#define S (frag ? frag->get_addr(ctx) : sym.get_addr(ctx))
-#define A (frag ? frag_addend : get_addend(*this, rel))
+    u64 S = frag ? frag->get_addr(ctx) : sym.get_addr(ctx);
+    u64 A = frag ? frag_addend : get_addend(*this, rel);
 
     switch (rel.r_type) {
     case R_ARM_ABS32:
@@ -474,16 +523,13 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
       if (std::optional<u64> val = get_tombstone(sym, frag))
         *(ul32 *)loc = *val;
       else
-        *(ul32 *)loc = S + A - ctx.tls_begin;
+        *(ul32 *)loc = S + A - ctx.dtp_addr;
       break;
     default:
       Fatal(ctx) << *this << ": invalid relocation for non-allocated sections: "
                  << rel;
       break;
     }
-
-#undef S
-#undef A
   }
 }
 
@@ -520,6 +566,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_ARM_THM_CALL:
     case R_ARM_CALL:
     case R_ARM_JUMP24:
+    case R_ARM_PLT32:
     case R_ARM_THM_JUMP24:
       if (sym.is_imported)
         sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);

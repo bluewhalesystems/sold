@@ -24,17 +24,11 @@ namespace mold::elf {
 using E = ARM64;
 
 static void write_adrp(u8 *buf, u64 val) {
-  u32 hi = bits(val, 32, 14);
-  u32 lo = bits(val, 13, 12);
-  *(ul32 *)buf &= 0b1001'1111'0000'0000'0000'0000'0001'1111;
-  *(ul32 *)buf |= (lo << 29) | (hi << 5);
+  *(ul32 *)buf |= (bits(val, 13, 12) << 29) | (bits(val, 32, 14) << 5);
 }
 
 static void write_adr(u8 *buf, u64 val) {
-  u32 hi = bits(val, 20, 2);
-  u32 lo = bits(val, 1, 0);
-  *(ul32 *)buf &= 0b1001'1111'0000'0000'0000'0000'0001'1111;
-  *(ul32 *)buf |= (lo << 29) | (hi << 5);
+  *(ul32 *)buf |= (bits(val, 1, 0) << 29) | (bits(val, 20, 2) << 5);
 }
 
 static void write_movn_movz(u8 *buf, i64 val) {
@@ -153,11 +147,11 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
                    << lo << ", " << hi << ")";
     };
 
-#define S   sym.get_addr(ctx)
-#define A   rel.r_addend
-#define P   (get_addr() + rel.r_offset)
-#define G   (sym.get_got_idx(ctx) * sizeof(Word<E>))
-#define GOT ctx.got->shdr.sh_addr
+    u64 S = sym.get_addr(ctx);
+    u64 A = rel.r_addend;
+    u64 P = get_addr() + rel.r_offset;
+    u64 G = sym.get_got_idx(ctx) * sizeof(Word<E>);
+    u64 GOT = ctx.got->shdr.sh_addr;
 
     switch (rel.r_type) {
     case R_AARCH64_ABS64:
@@ -181,30 +175,24 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_AARCH64_ADD_ABS_LO12_NC:
       *(ul32 *)loc |= bits(S + A, 11, 0) << 10;
       break;
-    case R_AARCH64_MOVW_UABS_G0: {
-      i64 val = S + A;
-      check(val, 0, 1 << 16);
-      *(ul32 *)loc |= bits(val, 15, 0) << 5;
+    case R_AARCH64_MOVW_UABS_G0:
+      check(S + A, 0, 1 << 16);
+      *(ul32 *)loc |= bits(S + A, 15, 0) << 5;
       break;
-    }
     case R_AARCH64_MOVW_UABS_G0_NC:
       *(ul32 *)loc |= bits(S + A, 15, 0) << 5;
       break;
-    case R_AARCH64_MOVW_UABS_G1: {
-      i64 val = S + A;
-      check(val, 0, 1LL << 32);
-      *(ul32 *)loc |= bits(val, 31, 16) << 5;
+    case R_AARCH64_MOVW_UABS_G1:
+      check(S + A, 0, 1LL << 32);
+      *(ul32 *)loc |= bits(S + A, 31, 16) << 5;
       break;
-    }
     case R_AARCH64_MOVW_UABS_G1_NC:
       *(ul32 *)loc |= bits(S + A, 31, 16) << 5;
       break;
-    case R_AARCH64_MOVW_UABS_G2: {
-      i64 val = S + A;
-      check(val, 0, 1LL << 48);
-      *(ul32 *)loc |= bits(val, 47, 32) << 5;
+    case R_AARCH64_MOVW_UABS_G2:
+      check(S + A, 0, 1LL << 48);
+      *(ul32 *)loc |= bits(S + A, 47, 32) << 5;
       break;
-    }
     case R_AARCH64_MOVW_UABS_G2_NC:
       *(ul32 *)loc |= bits(S + A, 47, 32) << 5;
       break;
@@ -223,12 +211,10 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       write_adrp(loc, val);
       break;
     }
-    case R_AARCH64_ADR_PREL_LO21: {
-      i64 val = S + A - P;
-      check(val, -(1LL << 20), 1LL << 20);
-      write_adr(loc, val);
+    case R_AARCH64_ADR_PREL_LO21:
+      check(S + A - P, -(1LL << 20), 1LL << 20);
+      write_adr(loc, S + A - P);
       break;
-    }
     case R_AARCH64_CALL26:
     case R_AARCH64_JUMP26: {
       if (sym.is_remaining_undef_weak()) {
@@ -238,38 +224,25 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         break;
       }
 
-      i64 lo = -(1 << 27);
-      i64 hi = 1 << 27;
       i64 val = S + A - P;
-
-      if (val < lo || hi <= val) {
-        RangeExtensionRef ref = extra.range_extn[i];
-        val = output_section->thunks[ref.thunk_idx]->get_addr(ref.sym_idx) + A - P;
-        assert(lo <= val && val < hi);
-      }
-
-      *(ul32 *)loc |= (val >> 2) & 0x03ff'ffff;
+      if (val < -(1 << 27) || (1 << 27) <= val)
+        val = get_thunk_addr(i) + A - P;
+      *(ul32 *)loc |= bits(val, 27, 2);
       break;
     }
     case R_AARCH64_CONDBR19:
-    case R_AARCH64_LD_PREL_LO19: {
-      i64 val = S + A - P;
-      check(val, -(1LL << 20), 1LL << 20);
-      *(ul32 *)loc |= bits(val, 20, 2) << 5;
+    case R_AARCH64_LD_PREL_LO19:
+      check(S + A - P, -(1LL << 20), 1LL << 20);
+      *(ul32 *)loc |= bits(S + A - P, 20, 2) << 5;
       break;
-    }
-    case R_AARCH64_PREL16: {
-      i64 val = S + A - P;
-      check(val, -(1LL << 15), 1LL << 15);
-      *(ul16 *)loc = val;
+    case R_AARCH64_PREL16:
+      check(S + A - P, -(1LL << 15), 1LL << 15);
+      *(ul16 *)loc = S + A - P;
       break;
-    }
-    case R_AARCH64_PREL32: {
-      i64 val = S + A - P;
-      check(val, -(1LL << 31), 1LL << 32);
-      *(ul32 *)loc = val;
+    case R_AARCH64_PREL32:
+      check(S + A - P, -(1LL << 31), 1LL << 32);
+      *(ul32 *)loc = S + A - P;
       break;
-    }
     case R_AARCH64_PREL64:
       *(ul64 *)loc = S + A - P;
       break;
@@ -372,12 +345,6 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     default:
       unreachable();
     }
-
-#undef S
-#undef A
-#undef P
-#undef G
-#undef GOT
   }
 }
 
@@ -409,8 +376,8 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
     i64 frag_addend;
     std::tie(frag, frag_addend) = get_fragment(ctx, rel);
 
-#define S (frag ? frag->get_addr(ctx) : sym.get_addr(ctx))
-#define A (frag ? frag_addend : (i64)rel.r_addend)
+    u64 S = frag ? frag->get_addr(ctx) : sym.get_addr(ctx);
+    u64 A = frag ? frag_addend : (i64)rel.r_addend;
 
     switch (rel.r_type) {
     case R_AARCH64_ABS64:
@@ -430,9 +397,6 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
                  << rel;
       break;
     }
-
-#undef S
-#undef A
   }
 }
 

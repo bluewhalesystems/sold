@@ -764,10 +764,10 @@ strip_universal_header(Context<E> &ctx, MappedFile<Context<E>> *mf) {
 
 template <typename E>
 static void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
-  if (get_file_type(mf) == FileType::MACH_UNIVERSAL)
+  if (get_file_type(ctx, mf) == FileType::MACH_UNIVERSAL)
     mf = strip_universal_header(ctx, mf);
 
-  switch (get_file_type(mf)) {
+  switch (get_file_type(ctx, mf)) {
   case FileType::TAPI:
   case FileType::MACH_DYLIB:
   case FileType::MACH_EXE:
@@ -779,7 +779,7 @@ static void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
     break;
   case FileType::AR:
     for (MappedFile<Context<E>> *child : read_archive_members(ctx, mf))
-      if (get_file_type(child) == FileType::MACH_OBJ)
+      if (get_file_type(ctx, child) == FileType::MACH_OBJ)
         ctx.objs.push_back(ObjectFile<E>::create(ctx, child, mf->name));
     break;
   default:

@@ -30,7 +30,7 @@ InputFile<E>::InputFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
   i64 num_sections = (ehdr.e_shnum == 0) ? sh_begin->sh_size : ehdr.e_shnum;
 
   if (mf->data + mf->size < (u8 *)(sh_begin + num_sections))
-    Fatal(ctx) << *this << ": e_shoff or e_shnum corrupted: "
+    Fatal(ctx) << mf->name << ": e_shoff or e_shnum corrupted: "
                << mf->size << " " << num_sections;
   elf_sections = {sh_begin, sh_begin + num_sections};
 
@@ -250,6 +250,10 @@ void ObjectFile<E>::initialize_sections(Context<E> &ctx) {
 
       this->sections[i] = std::make_unique<InputSection<E>>(ctx, *this, name, i);
 
+      if constexpr (is_ppc32<E>)
+        if (name == ".got2")
+          ppc32_got2 = this->sections[i].get();
+
       // Save debug sections for --gdb-index.
       if (ctx.arg.gdb_index) {
         InputSection<E> *isec = this->sections[i].get();
@@ -295,7 +299,7 @@ void ObjectFile<E>::initialize_sections(Context<E> &ctx) {
   // Attach relocation sections to their target sections.
   for (i64 i = 0; i < this->elf_sections.size(); i++) {
     const ElfShdr<E> &shdr = this->elf_sections[i];
-    if (shdr.sh_type != (is_rela<E> ? SHT_RELA : SHT_REL))
+    if (shdr.sh_type != (E::is_rela ? SHT_RELA : SHT_REL))
       continue;
 
     if (shdr.sh_info >= sections.size())
@@ -441,7 +445,7 @@ static Symbol<E> *insert_symbol(Context<E> &ctx, const ElfSym<E> &esym,
 
   Symbol<E> *sym = get_symbol(ctx, key, name);
 
-  if (esym.is_undef() && sym->wrap) {
+  if (esym.is_undef() && sym->is_wrapped) {
     key = save_string(ctx, "__wrap_" + std::string(key));
     name = save_string(ctx, "__wrap_" + std::string(name));
     return get_symbol(ctx, key, name);
@@ -571,9 +575,16 @@ static size_t find_null(std::string_view data, u64 entsize) {
 template <typename E>
 static std::unique_ptr<MergeableSection<E>>
 split_section(Context<E> &ctx, InputSection<E> &sec) {
+  if (!sec.is_alive || sec.sh_size == 0 || sec.relsec_idx != -1)
+    return nullptr;
+
+  const ElfShdr<E> &shdr = sec.shdr();
+  if (!(shdr.sh_flags & SHF_MERGE))
+    return nullptr;
+
   std::unique_ptr<MergeableSection<E>> rec(new MergeableSection<E>);
-  rec->parent = MergedSection<E>::get_instance(ctx, sec.name(), sec.shdr().sh_type,
-                                               sec.shdr().sh_flags);
+  rec->parent = MergedSection<E>::get_instance(ctx, sec.name(), shdr.sh_type,
+                                               shdr.sh_flags);
   rec->p2align = sec.p2align;
 
   // If thes section contents are compressed, uncompress them.
@@ -581,11 +592,11 @@ split_section(Context<E> &ctx, InputSection<E> &sec) {
 
   std::string_view data = sec.contents;
   const char *begin = data.data();
-  u64 entsize = sec.shdr().sh_entsize;
+  u64 entsize = shdr.sh_entsize;
   HyperLogLog estimator;
 
   // Split sections
-  if (sec.shdr().sh_flags & SHF_STRINGS) {
+  if (shdr.sh_flags & SHF_STRINGS) {
     if (entsize == 0) {
       // GHC (Glasgow Haskell Compiler) sometimes creates a mergeable
       // string section with entsize of 0 instead of 1, though such
@@ -609,6 +620,11 @@ split_section(Context<E> &ctx, InputSection<E> &sec) {
       estimator.insert(hash);
     }
   } else {
+    // OCaml compiler seems to create a mergeable non-string section with
+    // entisze of 0. Such section is malformed. We do not split such section.
+    if (entsize == 0)
+      return nullptr;
+
     if (data.size() % entsize)
       Fatal(ctx) << sec << ": section size is not multiple of sh_entsize";
 
@@ -677,11 +693,11 @@ void ObjectFile<E>::initialize_mergeable_sections(Context<E> &ctx) {
   mergeable_sections.resize(sections.size());
 
   for (i64 i = 0; i < sections.size(); i++) {
-    std::unique_ptr<InputSection<E>> &isec = sections[i];
-    if (isec && isec->is_alive && (isec->shdr().sh_flags & SHF_MERGE) &&
-        isec->relsec_idx == -1) {
-      mergeable_sections[i] = split_section(ctx, *isec);
-      isec->is_alive = false;
+    if (std::unique_ptr<InputSection<E>> &isec = sections[i]) {
+      if (std::unique_ptr<MergeableSection<E>> m = split_section(ctx, *isec)) {
+        mergeable_sections[i] = std::move(m);
+        isec->is_alive = false;
+      }
     }
   }
 }
@@ -948,7 +964,7 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
     else
       merge_visibility(ctx, sym, esym.st_visibility);
 
-    if (sym.traced)
+    if (sym.is_traced)
       print_trace_symbol(ctx, *this, esym, sym);
 
     if (esym.is_weak())
@@ -961,7 +977,7 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
     if (keep && fast_mark(sym.file->is_alive)) {
       feeder(sym.file);
 
-      if (sym.traced)
+      if (sym.is_traced)
         SyncOut(ctx) << "trace-symbol: " << *this << " keeps " << *sym.file
                      << " for " << sym;
     }
@@ -1042,51 +1058,58 @@ void ObjectFile<E>::claim_unresolved_symbols(Context<E> &ctx) {
       }
     }
 
-    auto claim = [&] {
+    auto claim = [&](bool is_imported) {
+      if (sym.is_traced)
+        SyncOut(ctx) << "trace-symbol: " << *this << ": unresolved"
+                     << (esym.is_weak() ? " weak" : "")
+                     << " symbol " << sym;
+
       sym.file = this;
       sym.origin = 0;
       sym.value = 0;
       sym.sym_idx = i;
       sym.is_weak = false;
+      sym.is_imported = is_imported;
       sym.is_exported = false;
+      sym.ver_idx = is_imported ? 0 : ctx.default_version;
     };
+
+    if (esym.is_undef_weak()) {
+      if (ctx.arg.shared && sym.visibility != STV_HIDDEN &&
+          ctx.arg.z_dynamic_undefined_weak) {
+        // Global weak undefined symbols are promoted to dynamic symbols
+        // when when linking a DSO, unless `-z nodynamic_undefined_weak`
+        // was given.
+        claim(true);
+      } else {
+        // Otherwise, weak undefs are converted to absolute symbols with value 0.
+        claim(false);
+      }
+      continue;
+    }
 
     if (ctx.arg.unresolved_symbols == UNRESOLVED_WARN)
       report_undef(sym);
 
-    // Convert remaining undefined symbols to dynamic symbols.
-    if (ctx.arg.shared && sym.visibility != STV_HIDDEN) {
-      // Traditionally, remaining undefined symbols cause a link failure
-      // only when we are creating an executable. Undefined symbols in
-      // shared objects are promoted to dynamic symbols, so that they'll
-      // get another chance to be resolved at run-time. You can change the
-      // behavior by passing `-z defs` to the linker.
-      //
-      // Even if `-z defs` is given, weak undefined symbols are still
-      // promoted to dynamic symbols for compatibility with other linkers.
-      // Some major programs, notably Firefox, depend on the behavior
-      // (they use this loophole to export symbols from libxul.so).
-      if (!ctx.arg.z_defs || esym.is_undef_weak() ||
-          ctx.arg.unresolved_symbols != UNRESOLVED_ERROR) {
-        claim();
-        sym.ver_idx = 0;
-        sym.is_imported = true;
-
-        if (sym.traced)
-          SyncOut(ctx) << "trace-symbol: " << *this << ": unresolved"
-                       << (esym.is_weak() ? " weak" : "")
-                       << " symbol " << sym;
-        continue;
-      }
+    // Traditionally, remaining undefined symbols cause a link failure
+    // only when we are creating an executable. Undefined symbols in
+    // shared objects are promoted to dynamic symbols, so that they'll
+    // get another chance to be resolved at run-time. You can change the
+    // behavior by passing `-z defs` to the linker.
+    //
+    // Even if `-z defs` is given, weak undefined symbols are still
+    // promoted to dynamic symbols for compatibility with other linkers.
+    // Some major programs, notably Firefox, depend on the behavior
+    // (they use this loophole to export symbols from libxul.so).
+    if (ctx.arg.shared && sym.visibility != STV_HIDDEN &&
+        (!ctx.arg.z_defs || ctx.arg.unresolved_symbols != UNRESOLVED_ERROR)) {
+      claim(true);
+      continue;
     }
 
     // Convert remaining undefined symbols to absolute symbols with value 0.
-    if (ctx.arg.unresolved_symbols != UNRESOLVED_ERROR ||
-        ctx.arg.noinhibit_exec || esym.is_undef_weak()) {
-      claim();
-      sym.ver_idx = ctx.default_version;
-      sym.is_imported = false;
-    }
+    if (ctx.arg.unresolved_symbols != UNRESOLVED_ERROR || ctx.arg.noinhibit_exec)
+      claim(false);
   }
 }
 
@@ -1472,14 +1495,14 @@ SharedFile<E>::mark_live_objects(Context<E> &ctx,
     const ElfSym<E> &esym = this->elf_syms[i];
     Symbol<E> &sym = *this->symbols[i];
 
-    if (sym.traced)
+    if (sym.is_traced)
       print_trace_symbol(ctx, *this, esym, sym);
 
     if (esym.is_undef() && sym.file && !sym.file->is_dso &&
         fast_mark(sym.file->is_alive)) {
       feeder(sym.file);
 
-      if (sym.traced)
+      if (sym.is_traced)
         SyncOut(ctx) << "trace-symbol: " << *this << " keeps " << *sym.file
                      << " for " << sym;
     }

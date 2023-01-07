@@ -927,6 +927,7 @@ struct Context {
     std::string map;
     std::string object_path_lto;
     std::string output = "a.out";
+    std::string plugin;
     std::vector<AddEmptySectionOption> add_empty_section;
     std::vector<SectAlignOption> sectalign;
     std::vector<SectCreateOption> sectcreate;

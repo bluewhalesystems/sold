@@ -52,7 +52,7 @@ ObjectFile<E>::create(Context<E> &ctx, MappedFile<Context<E>> *mf,
 
 template <typename E>
 void ObjectFile<E>::parse(Context<E> &ctx) {
-  if (get_file_type(this->mf) == FileType::LLVM_BITCODE) {
+  if (get_file_type(ctx, this->mf) == FileType::LLVM_BITCODE) {
     // Open an compiler IR file
     load_lto_plugin(ctx);
     this->lto_module =
@@ -410,7 +410,7 @@ void ObjectFile<E>::parse_data_in_code(Context<E> &ctx) {
 
 template <typename E>
 std::vector<std::string> ObjectFile<E>::get_linker_options(Context<E> &ctx) {
-  if (get_file_type(this->mf) == FileType::LLVM_BITCODE)
+  if (get_file_type(ctx, this->mf) == FileType::LLVM_BITCODE)
     return {};
 
   MachHeader &hdr = *(MachHeader *)this->mf->data;
@@ -1001,7 +1001,7 @@ find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
 
 template <typename E>
 void DylibFile<E>::parse(Context<E> &ctx) {
-  switch (get_file_type(this->mf)) {
+  switch (get_file_type(ctx, this->mf)) {
   case FileType::TAPI:
     parse_tapi(ctx);
     break;

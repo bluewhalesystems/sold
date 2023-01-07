@@ -57,7 +57,7 @@ InputSection<E>::InputSection(Context<E> &ctx, ObjectFile<E> &file,
   // early for REL-type ELF types to read relocation addends from
   // section contents. For RELA-type, we don't need to do this because
   // addends are in relocations.
-  if constexpr (!is_rela<E>)
+  if constexpr (!E::is_rela)
     uncompress(ctx);
 }
 
@@ -197,13 +197,16 @@ static void scan_rel(Context<E> &ctx, InputSection<E> &isec, Symbol<E> &sym,
       sym.flags |= NEEDS_CPLT;
     break;
   case DYNREL:
-  case IFUNC:
     dynrel();
     break;
   case BASEREL:
     check_textrel();
     if (!isec.is_relr_reloc(ctx, rel))
       isec.file.num_dynrel++;
+    break;
+  case IFUNC:
+    dynrel();
+    ctx.num_ifunc_dynrels.fetch_add(1, std::memory_order_relaxed);
     break;
   default:
     unreachable();
@@ -347,10 +350,14 @@ static void apply_absrel(Context<E> &ctx, InputSection<E> &isec,
     apply_dynrel();
     break;
   case IFUNC: {
-    u64 addr = sym.get_addr(ctx, NO_PLT) + A;
-    *dynrel++ = ElfRel<E>(P, E::R_IRELATIVE, 0, addr);
-    if (ctx.arg.apply_dynamic_relocs)
-      *(Word<E> *)loc = addr;
+    if constexpr (supports_ifunc<E>) {
+      u64 addr = sym.get_addr(ctx, NO_PLT) + A;
+      *dynrel++ = ElfRel<E>(P, E::R_IRELATIVE, 0, addr);
+      if (ctx.arg.apply_dynamic_relocs)
+        *(Word<E> *)loc = addr;
+    } else {
+      unreachable();
+    }
     break;
   }
   default:
@@ -399,7 +406,7 @@ void InputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
 
 // Get the name of a function containin a given offset.
 template <typename E>
-std::string_view InputSection<E>::get_func_name(Context<E> &ctx, i64 offset) {
+std::string_view InputSection<E>::get_func_name(Context<E> &ctx, i64 offset) const {
   for (const ElfSym<E> &esym : file.elf_syms) {
     if (esym.st_shndx == shndx && esym.st_type == STT_FUNC &&
         esym.st_value <= offset && offset < esym.st_value + esym.st_size) {

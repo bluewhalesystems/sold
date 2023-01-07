@@ -38,20 +38,20 @@ namespace mold::elf {
 // have twice longer range than its Thumb counterparts, but we
 // conservatively use the Thumb's limitation.
 //
-// PPC64's branch has 24 bits immediate, and the instructions are aligned
+// PPC's branch has 24 bits immediate, and the instructions are aligned
 // to 4, therefore 26.
 //
 // Here is the summary of branch instructions reaches:
 //
 //   ARM64: PC ± 128 MiB
 //   ARM32: PC ± 16 MiB
-//   PPC64: PC ± 32 MiB
+//   PPC:   PC ± 32 MiB
 template <typename E>
 static constexpr i64 max_distance =
-  1LL << (std::is_same_v<E, ARM64> ? 27 : std::is_same_v<E, ARM32> ? 24 : 25);
+  1LL << (is_arm64<E> ? 27 : is_arm32<E> ? 24 : 25);
 
 // We create thunks for each 12.8/1.6/3.2 MiB code block for
-// ARM64/ARM32/PPC64, respectively.
+// ARM64/ARM32/PPC, respectively.
 template <typename E>
 static constexpr i64 batch_size = max_distance<E> / 10;
 
@@ -63,13 +63,15 @@ template <typename E>
 static bool needs_thunk_rel(const ElfRel<E> &r) {
   u32 ty = r.r_type;
 
-  if constexpr (std::is_same_v<E, ARM64>) {
+  if constexpr (is_arm64<E>) {
     return ty == R_AARCH64_JUMP26 || ty == R_AARCH64_CALL26;
-  } else if constexpr (std::is_same_v<E, ARM32>) {
+  } else if constexpr (is_arm32<E>) {
     return ty == R_ARM_JUMP24 || ty == R_ARM_THM_JUMP24 ||
            ty == R_ARM_CALL   || ty == R_ARM_THM_CALL;
+  } else if constexpr (is_ppc32<E>) {
+    return ty == R_PPC_REL24  || ty == R_PPC_PLTREL24 || ty == R_PPC_LOCAL24PC;
   } else {
-    static_assert(is_ppc<E>);
+    static_assert(is_ppc64<E>);
     return ty == R_PPC64_REL24;
   }
 }
@@ -97,7 +99,7 @@ static bool is_reachable(Context<E> &ctx, InputSection<E> &isec,
   // Thumb and ARM B instructions cannot be converted to BX, so we
   // always have to make them jump to a thunk to switch processor mode
   // even if their destinations are within their ranges.
-  if constexpr (std::is_same_v<E, ARM32>) {
+  if constexpr (is_arm32<E>) {
     bool is_thumb = sym.get_addr(ctx) & 1;
     if ((rel.r_type == R_ARM_THM_JUMP24 && !is_thumb) ||
         (rel.r_type == R_ARM_JUMP24 && is_thumb))
@@ -264,8 +266,7 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
   osec.shdr.sh_size = offset;
 }
 
-#if defined(MOLD_ARM64) || defined(MOLD_ARM32) || \
-    defined(MOLD_PPC64V1) || defined(MOLD_PPC64V2)
+#if MOLD_ARM32 || MOLD_ARM64 || MOLD_PPC32 || MOLD_PPC64V1 || MOLD_PPC64V2
 using E = MOLD_TARGET;
 template void create_range_extension_thunks(Context<E> &, OutputSection<E> &);
 #endif

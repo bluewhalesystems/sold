@@ -27,77 +27,83 @@ namespace mold::elf {
 // Read the beginning of a given file and returns its machine type
 // (e.g. EM_X86_64 or EM_386).
 template <typename E>
-MachineType get_machine_type(Context<E> &ctx, MappedFile<Context<E>> *mf) {
-  auto get_elf_type = [&](u8 *buf) {
-    bool is_le = (((EL32Ehdr *)buf)->e_ident[EI_DATA] == ELFDATA2LSB);
+std::string_view get_machine_type(Context<E> &ctx, MappedFile<Context<E>> *mf) {
+  auto get_elf_type = [&](u8 *buf) -> std::string_view {
+    bool is_le = (((ElfEhdr<I386> *)buf)->e_ident[EI_DATA] == ELFDATA2LSB);
     bool is_64;
     u32 e_machine;
 
     if (is_le) {
-      EL32Ehdr &ehdr = *(EL32Ehdr *)buf;
+      auto &ehdr = *(ElfEhdr<I386> *)buf;
       is_64 = (ehdr.e_ident[EI_CLASS] == ELFCLASS64);
       e_machine = ehdr.e_machine;
     } else {
-      EB32Ehdr &ehdr = *(EB32Ehdr *)buf;
+      auto &ehdr = *(ElfEhdr<M68K> *)buf;
       is_64 = (ehdr.e_ident[EI_CLASS] == ELFCLASS64);
       e_machine = ehdr.e_machine;
     }
 
     switch (e_machine) {
     case EM_386:
-      return MachineType::I386;
+      return I386::target_name;
     case EM_X86_64:
-      return MachineType::X86_64;
+      return X86_64::target_name;
     case EM_ARM:
-      return MachineType::ARM32;
+      return ARM32::target_name;
     case EM_AARCH64:
-      return MachineType::ARM64;
+      return ARM64::target_name;
     case EM_RISCV:
       if (is_le)
-        return is_64 ? MachineType::RV64LE : MachineType::RV32LE;
-      return is_64 ? MachineType::RV64BE : MachineType::RV32BE;
+        return is_64 ? RV64LE::target_name : RV32LE::target_name;
+      return is_64 ? RV64BE::target_name : RV32BE::target_name;
+    case EM_PPC:
+      return PPC32::target_name;
     case EM_PPC64:
-      return is_le ? MachineType::PPC64V2 : MachineType::PPC64V1;
+      return is_le ? PPC64V2::target_name : PPC64V1::target_name;
     case EM_S390X:
-      return MachineType::S390X;
+      return S390X::target_name;
     case EM_SPARC64:
-      return MachineType::SPARC64;
+      return SPARC64::target_name;
     case EM_68K:
-      return MachineType::M68K;
+      return M68K::target_name;
+    case EM_SH:
+      return SH4::target_name;
+    case EM_ALPHA:
+      return ALPHA::target_name;
     default:
-      return MachineType::NONE;
+      return "";
     }
   };
 
-  switch (get_file_type(mf)) {
+  switch (get_file_type(ctx, mf)) {
   case FileType::ELF_OBJ:
   case FileType::ELF_DSO:
   case FileType::GCC_LTO_OBJ:
     return get_elf_type(mf->data);
   case FileType::AR:
     for (MappedFile<Context<E>> *child : read_fat_archive_members(ctx, mf))
-      if (get_file_type(child) == FileType::ELF_OBJ)
+      if (get_file_type(ctx, child) == FileType::ELF_OBJ)
         return get_elf_type(child->data);
-    return MachineType::NONE;
+    return "";
   case FileType::THIN_AR:
     for (MappedFile<Context<E>> *child : read_thin_archive_members(ctx, mf))
-      if (get_file_type(child) == FileType::ELF_OBJ)
+      if (get_file_type(ctx, child) == FileType::ELF_OBJ)
         return get_elf_type(child->data);
-    return MachineType::NONE;
+    return "";
   case FileType::TEXT:
     return get_script_output_type(ctx, mf);
   default:
-    return MachineType::NONE;
+    return "";
   }
 }
 
 template <typename E>
 static void
 check_file_compatibility(Context<E> &ctx, MappedFile<Context<E>> *mf) {
-  MachineType mt = get_machine_type(ctx, mf);
-  if (mt != ctx.arg.emulation)
+  std::string_view target = get_machine_type(ctx, mf);
+  if (target != ctx.arg.emulation)
     Fatal(ctx) << mf->name << ": incompatible file type: "
-               << ctx.arg.emulation << " is expected but got " << mt;
+               << ctx.arg.emulation << " is expected but got " << target;
 }
 
 template <typename E>
@@ -155,8 +161,7 @@ void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
   if (ctx.visited.contains(mf->name))
     return;
 
-  FileType type = get_file_type(mf);
-  switch (type) {
+  switch (get_file_type(ctx, mf)) {
   case FileType::ELF_OBJ:
     ctx.objs.push_back(new_object_file(ctx, mf, ""));
     return;
@@ -167,7 +172,7 @@ void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
   case FileType::AR:
   case FileType::THIN_AR:
     for (MappedFile<Context<E>> *child : read_archive_members(ctx, mf)) {
-      switch (get_file_type(child)) {
+      switch (get_file_type(ctx, child)) {
       case FileType::ELF_OBJ:
         ctx.objs.push_back(new_object_file(ctx, child, mf->name));
         break;
@@ -196,13 +201,14 @@ void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
 }
 
 template <typename E>
-static MachineType
+static std::string_view
 deduce_machine_type(Context<E> &ctx, std::span<std::string> args) {
   for (std::string_view arg : args)
     if (!arg.starts_with('-'))
       if (auto *mf = MappedFile<Context<E>>::open(ctx, std::string(arg)))
-        if (MachineType ty = get_machine_type(ctx, mf); ty != MachineType::NONE)
-          return ty;
+        if (std::string_view target = get_machine_type(ctx, mf);
+            !target.empty())
+          return target;
   Fatal(ctx) << "-m option is missing";
 }
 
@@ -212,10 +218,10 @@ MappedFile<Context<E>> *open_library(Context<E> &ctx, std::string path) {
   if (!mf)
     return nullptr;
 
-  MachineType ty = get_machine_type(ctx, mf);
-  if (ty == MachineType::NONE || ty == E::machine_type)
+  std::string_view target = get_machine_type(ctx, mf);
+  if (target.empty() || target == E::target_name)
     return mf;
-  Warn(ctx) << path << ": skipping incompatible file " << (int)ty
+  Warn(ctx) << path << ": skipping incompatible file " << target
             << " " << (int)E::e_machine;
   return nullptr;
 }
@@ -330,35 +336,38 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
 // We speculatively run elf_main with X86_64, and if the speculation was
 // wrong, re-run it with an actual machine type.
 template <typename E>
-static int redo_main(int argc, char **argv, MachineType ty) {
-  switch (ty) {
-  case MachineType::I386:
+static int redo_main(int argc, char **argv, std::string_view target) {
+  if (target == I386::target_name)
     return elf_main<I386>(argc, argv);
-  case MachineType::ARM64:
+  if (target == ARM64::target_name)
     return elf_main<ARM64>(argc, argv);
-  case MachineType::ARM32:
+  if (target == ARM32::target_name)
     return elf_main<ARM32>(argc, argv);
-  case MachineType::RV64LE:
+  if (target == RV64LE::target_name)
     return elf_main<RV64LE>(argc, argv);
-  case MachineType::RV64BE:
+  if (target == RV64BE::target_name)
     return elf_main<RV64BE>(argc, argv);
-  case MachineType::RV32LE:
+  if (target == RV32LE::target_name)
     return elf_main<RV32LE>(argc, argv);
-  case MachineType::RV32BE:
+  if (target == RV32BE::target_name)
     return elf_main<RV32BE>(argc, argv);
-  case MachineType::PPC64V1:
+  if (target == PPC32::target_name)
+    return elf_main<PPC32>(argc, argv);
+  if (target == PPC64V1::target_name)
     return elf_main<PPC64V1>(argc, argv);
-  case MachineType::PPC64V2:
+  if (target == PPC64V2::target_name)
     return elf_main<PPC64V2>(argc, argv);
-  case MachineType::S390X:
+  if (target == S390X::target_name)
     return elf_main<S390X>(argc, argv);
-  case MachineType::SPARC64:
+  if (target == SPARC64::target_name)
     return elf_main<SPARC64>(argc, argv);
-  case MachineType::M68K:
+  if (target == M68K::target_name)
     return elf_main<M68K>(argc, argv);
-  default:
-    unreachable();
-  }
+  if (target == SH4::target_name)
+    return elf_main<SH4>(argc, argv);
+  if (target == ALPHA::target_name)
+    return elf_main<ALPHA>(argc, argv);
+  unreachable();
 }
 
 template <typename E>
@@ -378,12 +387,12 @@ int elf_main(int argc, char **argv) {
   std::vector<std::string> file_args = parse_nonpositional_args(ctx);
 
   // If no -m option is given, deduce it from input files.
-  if (ctx.arg.emulation == MachineType::NONE)
+  if (ctx.arg.emulation.empty())
     ctx.arg.emulation = deduce_machine_type(ctx, file_args);
 
   // Redo if -m is not x86-64.
-  if constexpr (std::is_same_v<E, X86_64>)
-    if (ctx.arg.emulation != MachineType::X86_64)
+  if constexpr (is_x86_64<E>)
+    if (ctx.arg.emulation != X86_64::target_name)
       return redo_main<E>(argc, argv, ctx.arg.emulation);
 
   Timer t_all(ctx, "all");
@@ -408,7 +417,7 @@ int elf_main(int argc, char **argv) {
 
   // Handle --wrap options if any.
   for (std::string_view name : ctx.arg.wrap)
-    get_symbol(ctx, name)->wrap = true;
+    get_symbol(ctx, name)->is_wrapped = true;
 
   // Handle --retain-symbols-file options if any.
   if (ctx.arg.retain_symbols_file)
@@ -416,7 +425,7 @@ int elf_main(int argc, char **argv) {
       get_symbol(ctx, name)->write_to_symtab = true;
 
   for (std::string_view arg : ctx.arg.trace_symbol)
-    get_symbol(ctx, arg)->traced = true;
+    get_symbol(ctx, arg)->is_traced = true;
 
   // Parse input files
   read_input_files(ctx, file_args);
@@ -496,7 +505,10 @@ int elf_main(int argc, char **argv) {
   if (!ctx.arg.allow_multiple_definition)
     check_duplicate_symbols(ctx);
 
-  if constexpr (std::is_same_v<E, PPC64V1>)
+  // Warn if symbols with different types are defined under the same name.
+  check_symbol_types(ctx);
+
+  if constexpr (is_ppc64v1<E>)
     ppc64v1_rewrite_opd(ctx);
 
   // Bin input sections into output sections.
@@ -568,7 +580,7 @@ int elf_main(int argc, char **argv) {
   if (!ctx.arg.soname.empty())
     ctx.dynstr->add_string(ctx.arg.soname);
 
-  if constexpr (std::is_same_v<E, PPC64V1>)
+  if constexpr (is_ppc64v1<E>)
     ppc64v1_scan_symbols(ctx);
 
   // Scan relocations to find symbols that need entries in .got, .plt,
@@ -735,11 +747,14 @@ extern template int elf_main<RV32BE>(int, char **);
 extern template int elf_main<RV32LE>(int, char **);
 extern template int elf_main<RV64LE>(int, char **);
 extern template int elf_main<RV64BE>(int, char **);
+extern template int elf_main<PPC32>(int, char **);
 extern template int elf_main<PPC64V1>(int, char **);
 extern template int elf_main<PPC64V2>(int, char **);
 extern template int elf_main<S390X>(int, char **);
 extern template int elf_main<SPARC64>(int, char **);
 extern template int elf_main<M68K>(int, char **);
+extern template int elf_main<SH4>(int, char **);
+extern template int elf_main<ALPHA>(int, char **);
 
 int main(int argc, char **argv) {
   return elf_main<X86_64>(argc, argv);

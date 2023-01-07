@@ -44,7 +44,7 @@
 # features and behave exactly the same.
 
 cmake_minimum_required(VERSION 3.13)
-project(mold VERSION 1.7.1)
+project(mold VERSION 1.9.0)
 
 include(CMakeDependentOption)
 include(GNUInstallDirs)
@@ -233,16 +233,21 @@ endif()
 include(CheckCXXSourceCompiles)
 check_cxx_source_compiles("#include <atomic>
 int main() {
-  std::atomic<uint8_t> w1;
-  std::atomic<uint16_t> w2;
-  std::atomic<uint32_t> w4;
-  std::atomic<uint64_t> w8;
-
-  return ++w1 + ++w2 + ++w4 + ++w8;
+  std::atomic_uint8_t  a;
+  std::atomic_uint16_t b;
+  std::atomic_uint32_t c;
+  std::atomic_uint64_t d;
+  return ++a + ++b + ++c + ++d;
 }" HAVE_FULL_ATOMIC_SUPPORT)
 
 if(NOT HAVE_FULL_ATOMIC_SUPPORT)
   target_link_libraries(mold PRIVATE atomic)
+endif()
+
+# Add -pthread
+if(NOT APPLE AND NOT WIN32)
+  target_compile_options(mold PRIVATE -pthread)
+  target_link_options(mold PRIVATE -pthread)
 endif()
 
 # Create a .cc file containing the current git hash for `mold --version`.
@@ -271,7 +276,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 # on a multicore machine.
 list(APPEND MOLD_ELF_TARGETS
   X86_64 I386 ARM64 ARM32 RV32LE RV32BE RV64LE RV64BE
-  PPC64V1 PPC64V2 S390X SPARC64 M68K)
+  PPC32 PPC64V1 PPC64V2 S390X SPARC64 M68K SH4 ALPHA)
 
 list(APPEND MOLD_ELF_TEMPLATE_FILES
   elf/cmdline.cc
@@ -332,16 +337,20 @@ endif()
 target_sources(mold PRIVATE
   compress.cc
   demangle.cc
+  elf/arch-alpha.cc
   elf/arch-arm32.cc
   elf/arch-arm64.cc
   elf/arch-i386.cc
   elf/arch-m68k.cc
+  elf/arch-ppc32.cc
   elf/arch-ppc64v1.cc
   elf/arch-ppc64v2.cc
   elf/arch-riscv.cc
   elf/arch-s390x.cc
+  elf/arch-sh4.cc
   elf/arch-sparc64.cc
   elf/arch-x86-64.cc
+  elf/elf.cc
   filepath.cc
   git-hash.cc
   glob.cc
@@ -412,8 +421,11 @@ endif()
 
 if(NOT CMAKE_SKIP_INSTALL_RULES)
   install(TARGETS mold RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-  install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
   install(FILES docs/mold.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1/)
+
+  if(EXISTS "${CMAKE_SOURCE_DIR}/LICENSE")
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+  endif()
 
   function(mold_install_relative_symlink OLD NEW)
     install(CODE "

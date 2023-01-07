@@ -23,15 +23,15 @@ enum class FileType {
   LLVM_BITCODE,
 };
 
-template <typename C>
-bool is_text_file(MappedFile<C> *mf) {
+template <typename MappedFile>
+bool is_text_file(MappedFile *mf) {
   u8 *data = mf->data;
   return mf->size >= 4 && isprint(data[0]) && isprint(data[1]) &&
          isprint(data[2]) && isprint(data[3]);
 }
 
-template <typename E, typename C>
-inline bool is_gcc_lto_obj(MappedFile<C> *mf) {
+template <typename E, typename Context, typename MappedFile>
+inline bool is_gcc_lto_obj(Context &ctx, MappedFile *mf) {
   using namespace mold::elf;
 
   const char *data = mf->get_contents().data();
@@ -45,20 +45,23 @@ inline bool is_gcc_lto_obj(MappedFile<C> *mf) {
     ? sh_begin->sh_link : ehdr.e_shstrndx;
 
   for (ElfShdr<E> &sec : shdrs) {
-    // GCC LTO object contains only sections symbols followed by a common
-    // symbol whose name is `__gnu_lto_slim` (or `__gnu_lto_v1` for older
-    // GCC releases).
-    //
-    // However, FAT LTO objects don't have any of the above mentioned symbols
-    // and can identify LTO by `.gnu.lto_.symtab.` section, similarly
-    // to what lto-plugin does.
-    std::string_view name = data + shdrs[shstrtab_idx].sh_offset + sec.sh_name;
-    if (name.starts_with (".gnu.lto_.symtab."))
+    // GCC FAT LTO objects contain both regular ELF sections and GCC-
+    // specific LTO sections, so that they can be linked as LTO objects if
+    // the LTO linker plugin is available and falls back as regular
+    // objects otherwise. GCC FAT LTO object can be identified by the
+    // presence of `.gcc.lto_.symtab` section.
+    if (!ctx.arg.plugin.empty()) {
+      std::string_view name = data + shdrs[shstrtab_idx].sh_offset + sec.sh_name;
+      if (name.starts_with(".gnu.lto_.symtab."))
       return true;
+    }
 
     if (sec.sh_type != SHT_SYMTAB)
       continue;
 
+    // GCC non-FAT LTO object contains only sections symbols followed by
+    // a common symbol whose name is `__gnu_lto_slim` (or `__gnu_lto_v1`
+    // for older GCC releases).
     std::span<ElfSym<E>> elf_syms{(ElfSym<E> *)(data + sec.sh_offset),
                                   (size_t)sec.sh_size / sizeof(ElfSym<E>)};
 
@@ -82,47 +85,49 @@ inline bool is_gcc_lto_obj(MappedFile<C> *mf) {
   return false;
 }
 
-template <typename C>
-FileType get_file_type(MappedFile<C> *mf) {
+template <typename Context, typename MappedFile>
+FileType get_file_type(Context &ctx, MappedFile *mf) {
+  using namespace elf;
+
   std::string_view data = mf->get_contents();
 
   if (data.empty())
     return FileType::EMPTY;
 
   if (data.starts_with("\177ELF")) {
-    u8 byte_order = ((elf::EL32Ehdr *)data.data())->e_ident[elf::EI_DATA];
+    u8 byte_order = ((ElfEhdr<I386> *)data.data())->e_ident[EI_DATA];
 
-    if (byte_order == elf::ELFDATA2LSB) {
-      elf::EL32Ehdr &ehdr = *(elf::EL32Ehdr *)data.data();
+    if (byte_order == ELFDATA2LSB) {
+      auto &ehdr = *(ElfEhdr<I386> *)data.data();
 
-      if (ehdr.e_type == elf::ET_REL) {
-        if (ehdr.e_ident[elf::EI_CLASS] == elf::ELFCLASS32) {
-          if (is_gcc_lto_obj<elf::I386>(mf))
+      if (ehdr.e_type == ET_REL) {
+        if (ehdr.e_ident[EI_CLASS] == ELFCLASS32) {
+          if (is_gcc_lto_obj<I386>(ctx, mf))
             return FileType::GCC_LTO_OBJ;
         } else {
-          if (is_gcc_lto_obj<elf::X86_64>(mf))
+          if (is_gcc_lto_obj<X86_64>(ctx, mf))
             return FileType::GCC_LTO_OBJ;
         }
         return FileType::ELF_OBJ;
       }
 
-      if (ehdr.e_type == elf::ET_DYN)
+      if (ehdr.e_type == ET_DYN)
         return FileType::ELF_DSO;
     } else {
-      elf::EB32Ehdr &ehdr = *(elf::EB32Ehdr *)data.data();
+      auto &ehdr = *(ElfEhdr<M68K> *)data.data();
 
-      if (ehdr.e_type == elf::ET_REL) {
-        if (ehdr.e_ident[elf::EI_CLASS] == elf::ELFCLASS32) {
-          if (is_gcc_lto_obj<elf::M68K>(mf))
+      if (ehdr.e_type == ET_REL) {
+        if (ehdr.e_ident[EI_CLASS] == ELFCLASS32) {
+          if (is_gcc_lto_obj<M68K>(ctx, mf))
             return FileType::GCC_LTO_OBJ;
         } else {
-          if (is_gcc_lto_obj<elf::SPARC64>(mf))
+          if (is_gcc_lto_obj<SPARC64>(ctx, mf))
             return FileType::GCC_LTO_OBJ;
         }
         return FileType::ELF_OBJ;
       }
 
-      if (ehdr.e_type == elf::ET_DYN)
+      if (ehdr.e_type == ET_DYN)
         return FileType::ELF_DSO;
     }
     return FileType::UNKNOWN;
