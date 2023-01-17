@@ -1,7 +1,7 @@
 #include "mold.h"
-#include "../archive-file.h"
-#include "../output-file.h"
-#include "../sha.h"
+#include "../common/archive-file.h"
+#include "../common/output-file.h"
+#include "../common/sha.h"
 
 #include <cstdlib>
 #include <fcntl.h>

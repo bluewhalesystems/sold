@@ -1,5 +1,5 @@
 #include "mold.h"
-#include "../archive-file.h"
+#include "../common/archive-file.h"
 
 namespace mold::macho {
 

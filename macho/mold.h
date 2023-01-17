@@ -2,7 +2,7 @@
 
 #include "macho.h"
 #include "lto.h"
-#include "../mold.h"
+#include "../common/common.h"
 
 #include <functional>
 #include <map>

@@ -1,5 +1,5 @@
 #include "mold.h"
-#include "../sha.h"
+#include "../common/sha.h"
 
 #include <shared_mutex>
 #include <tbb/enumerable_thread_specific.h>

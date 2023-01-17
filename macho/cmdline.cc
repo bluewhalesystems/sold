@@ -1,5 +1,5 @@
 #include "mold.h"
-#include "../cmdline.h"
+#include "../common/cmdline.h"
 
 #include <optional>
 #include <regex>
