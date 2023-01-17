@@ -38,7 +38,7 @@
 // doesn't seems to be worth its complexity. Our PLT simply doesn't rely
 // on a %r30 value.
 //
-// https://github.com/rui314/mold/wiki/ppc32-psabi.pdf
+// https://github.com/rui314/psabi/blob/main/ppc32.pdf
 
 #include "mold.h"
 
@@ -51,10 +51,6 @@ static u64 hi(u64 x)       { return x >> 16; }
 static u64 ha(u64 x)       { return (x + 0x8000) >> 16; }
 static u64 high(u64 x)     { return (x >> 16) & 0xffff; }
 static u64 higha(u64 x)    { return ((x + 0x8000) >> 16) & 0xffff; }
-static u64 higher(u64 x)   { return (x >> 32) & 0xffff; }
-static u64 highera(u64 x)  { return ((x + 0x8000) >> 32) & 0xffff; }
-static u64 highest(u64 x)  { return x >> 48; }
-static u64 highesta(u64 x) { return (x + 0x8000) >> 48; }
 
 template <>
 void write_plt_header(Context<E> &ctx, u8 *buf) {
@@ -157,9 +153,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     dynrel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset +
                            file.reldyn_offset + this->reldyn_offset);
 
-  u64 got2 = 0;
-  if (file.ppc32_got2)
-    got2 = file.ppc32_got2->output_section->shdr.sh_addr + file.ppc32_got2->offset;
+  u64 GOT2 = file.ppc32_got2 ? file.ppc32_got2->get_addr() : 0;
 
   for (i64 i = 0; i < rels.size(); i++) {
     const ElfRel<E> &rel = rels[i];
@@ -201,16 +195,16 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       *(ub32 *)loc |= bits(S + A, 31, 2) << 2;
       break;
     case R_PPC_PLT16_LO:
-      *(ub16 *)loc = lo(G + GOT - got2 - A);
+      *(ub16 *)loc = lo(G + GOT - A - GOT2);
       break;
     case R_PPC_PLT16_HI:
-      *(ub16 *)loc = hi(G + GOT - got2 - A);
+      *(ub16 *)loc = hi(G + GOT - A - GOT2);
       break;
     case R_PPC_PLT16_HA:
-      *(ub16 *)loc = ha(G + GOT - got2 - A);
+      *(ub16 *)loc = ha(G + GOT - A - GOT2);
       break;
     case R_PPC_PLT32:
-      *(ub32 *)loc = G + GOT - got2 - A;
+      *(ub32 *)loc = G + GOT - A - GOT2;
       break;
     case R_PPC_REL14:
       *(ub32 *)loc |= bits(S + A - P, 15, 2) << 2;

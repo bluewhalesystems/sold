@@ -32,7 +32,7 @@
 #endif
 
 #define XXH_INLINE_ALL 1
-#include "third-party/xxhash/xxhash.h"
+#include "../third-party/xxhash/xxhash.h"
 
 #ifdef NDEBUG
 # define unreachable() __builtin_unreachable()
@@ -405,9 +405,9 @@ public:
     nbuckets = std::max<i64>(MIN_NBUCKETS, bit_ceil(nbuckets));
 
     this->nbuckets = nbuckets;
-    keys = (std::atomic<const char *> *)calloc(nbuckets, sizeof(keys[0]));
-    key_sizes = (u32 *)calloc(nbuckets, sizeof(key_sizes[0]));
-    values = (T *)calloc(nbuckets, sizeof(values[0]));
+    keys = (std::atomic<const char *> *)calloc(nbuckets, sizeof(char *));
+    key_sizes = (u32 *)malloc(nbuckets * sizeof(u32));
+    values = (T *)malloc(nbuckets * sizeof(T));
   }
 
   std::pair<T *, bool> insert(std::string_view key, u64 hash, const T &val) {
@@ -427,7 +427,7 @@ public:
 
       if (ptr == nullptr) {
         if (!keys[idx].compare_exchange_weak(ptr, marker,
-                                             std::memory_order_acq_rel))
+                                             std::memory_order_acquire))
           continue;
         new (values + idx) T(val);
         key_sizes[idx] = key.size();
@@ -448,7 +448,7 @@ public:
     return {nullptr, false};
   }
 
-  bool has_key(i64 idx) {
+  const char *get_key(i64 idx) {
     return keys[idx].load(std::memory_order_relaxed);
   }
 
@@ -457,7 +457,6 @@ public:
   static constexpr i64 MAX_RETRY = 128;
 
   i64 nbuckets = 0;
-  std::atomic<const char *> *keys = nullptr;
   u32 *key_sizes = nullptr;
   T *values = nullptr;
 
@@ -470,6 +469,8 @@ private:
 #endif
   }
 
+private:
+  std::atomic<const char *> *keys = nullptr;
   static constexpr const char *marker = "marker";
 };
 
@@ -646,13 +647,13 @@ public:
   }
 
   Counter &operator++(int) {
-    if (enabled)
+    if (enabled) [[unlikely]]
       values.local()++;
     return *this;
   }
 
   Counter &operator+=(int delta) {
-    if (enabled)
+    if (enabled) [[unlikely]]
       values.local() += delta;
     return *this;
   }

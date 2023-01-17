@@ -113,16 +113,15 @@ void create_synthetic_sections(Context<E> &ctx) {
   ctx.note_package = push(new NotePackageSection<E>);
   ctx.note_property = push(new NotePropertySection<E>);
 
-  if (ctx.arg.is_static) {
-    if constexpr (is_s390x<E>)
-      ctx.extra.tls_get_offset = push(new S390XTlsGetOffsetSection);
-
-    if constexpr (is_sparc<E>)
-      ctx.extra.tls_get_addr = push(new SparcTlsGetAddrSection);
-  }
 
   if constexpr (is_ppc64v1<E>)
     ctx.extra.opd = push(new PPC64OpdSection);
+
+  if constexpr (is_sparc<E>) {
+    if (ctx.arg.is_static)
+      ctx.extra.tls_get_addr_sec = push(new SparcTlsGetAddrSection);
+    ctx.extra.tls_get_addr_sym = get_symbol(ctx, "__tls_get_addr");
+  }
 
   if constexpr (is_alpha<E>)
     ctx.extra.got = push(new AlphaGotSection);
@@ -133,9 +132,6 @@ void create_synthetic_sections(Context<E> &ctx) {
     ctx.dynstr->keep();
     ctx.dynsym->keep();
   }
-
-  ctx.tls_get_addr = get_symbol(ctx, "__tls_get_addr");
-  ctx.tls_get_offset = get_symbol(ctx, "__tls_get_offset");
 }
 
 template <typename E>
@@ -331,23 +327,12 @@ void add_comment_string(Context<E> &ctx, std::string str) {
 
   std::string_view buf = save_string(ctx, str);
   std::string_view data(buf.data(), buf.size() + 1);
-  SectionFragment<E> *frag = sec->insert(data, hash_string(data), 0);
-  frag->is_alive = true;
+  sec->insert(ctx, data, hash_string(data), 0);
 }
 
 template <typename E>
 void compute_merged_section_sizes(Context<E> &ctx) {
   Timer t(ctx, "compute_merged_section_sizes");
-
-  // Mark section fragments referenced by live objects.
-  if (!ctx.arg.gc_sections) {
-    tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
-      for (std::unique_ptr<MergeableSection<E>> &m : file->mergeable_sections)
-        if (m)
-          for (SectionFragment<E> *frag : m->fragments)
-            frag->is_alive.store(true, std::memory_order_relaxed);
-    });
-  }
 
   // Add an identification string to .comment.
   if (!ctx.arg.oformat_binary)
@@ -357,7 +342,6 @@ void compute_merged_section_sizes(Context<E> &ctx) {
   if (char *env = getenv("MOLD_DEBUG"); env && env[0])
     add_comment_string(ctx, "mold command line: " + get_cmdline_args(ctx));
 
-  Timer t2(ctx, "MergedSection assign_offsets");
   tbb::parallel_for_each(ctx.merged_sections,
                          [&](std::unique_ptr<MergedSection<E>> &sec) {
     sec->assign_offsets(ctx);
@@ -479,7 +463,7 @@ template <typename E>
 void create_output_sections(Context<E> &ctx) {
   Timer t(ctx, "create_output_sections");
 
-  struct Cmp {
+  struct Hash {
     size_t operator()(const OutputSectionKey &k) const {
       u64 h = hash_string(k.name);
       h = combine_hash(h, std::hash<u64>{}(k.type));
@@ -488,34 +472,53 @@ void create_output_sections(Context<E> &ctx) {
     }
   };
 
-  std::unordered_map<OutputSectionKey, OutputSection<E> *, Cmp> map;
+  std::unordered_map<OutputSectionKey, OutputSection<E> *, Hash> map;
   std::shared_mutex mu;
 
   // Instantiate output sections
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    // Make a per-thread cache of the main map to avoid lock contention.
+    // It makes a noticeable difference if we have millions of input sections.
+    decltype(map) cache;
+    {
+      std::shared_lock lock(mu);
+      cache = map;
+    }
+
     for (std::unique_ptr<InputSection<E>> &isec : file->sections) {
       if (!isec || !isec->is_alive)
         continue;
 
       OutputSectionKey key = get_output_section_key(ctx, *isec);
 
-      {
-        std::shared_lock lock(mu);
-        auto it = map.find(key);
-        if (it != map.end()) {
-          isec->output_section = it->second;
-          continue;
-        }
+      if (auto it = cache.find(key); it != cache.end()) {
+        isec->output_section = it->second;
+        continue;
       }
 
-      std::unique_ptr<OutputSection<E>> osec =
-        std::make_unique<OutputSection<E>>(key.name, key.type, key.flags);
-      std::unique_lock lock(mu);
+      auto get_or_insert = [&] {
+        {
+          std::shared_lock lock(mu);
+          if (auto it = map.find(key); it != map.end())
+            return it->second;
+        }
 
-      auto [it, inserted] = map.insert({key, osec.get()});
-      isec->output_section = it->second;
-      if (inserted)
-        ctx.osec_pool.emplace_back(std::move(osec));
+        std::unique_ptr<OutputSection<E>> osec =
+          std::make_unique<OutputSection<E>>(key.name, key.type, key.flags);
+
+        std::unique_lock lock(mu);
+        auto [it, inserted] = map.insert({key, osec.get()});
+        OutputSection<E> *ret = it->second;
+        lock.unlock();
+
+        if (inserted)
+          ctx.osec_pool.emplace_back(std::move(osec));
+        return ret;
+      };
+
+      OutputSection<E> *osec = get_or_insert();
+      isec->output_section = osec;
+      cache.insert({key, osec});
     }
   });
 
@@ -803,37 +806,14 @@ void print_dependencies(Context<E> &ctx) {
   SyncOut(ctx) <<
 R"(# This is an output of the mold linker's --print-dependencies option.
 #
-# Each line consists of three fields, <file1>, <file2> and <symbol>
-# separated by tab characters. It indicates that <file1> depends on
-# <file2> to use <symbol>.)";
-
-  auto print = [&](InputFile<E> *file) {
-    for (i64 i = file->first_global; i < file->elf_syms.size(); i++) {
-      ElfSym<E> &esym = file->elf_syms[i];
-      Symbol<E> &sym = *file->symbols[i];
-      if (esym.is_undef() && sym.file && sym.file != file)
-        SyncOut(ctx) << *file << "\t" << *sym.file << "\t" << sym;
-    }
-  };
-
-  for (InputFile<E> *file : ctx.objs)
-    print(file);
-  for (InputFile<E> *file : ctx.dsos)
-    print(file);
-}
-
-template <typename E>
-void print_dependencies_full(Context<E> &ctx) {
-  SyncOut(ctx) <<
-R"(# This is an output of the mold linker's --print-dependencies=full option.
-#
 # Each line consists of 4 fields, <section1>, <section2>, <symbol-type> and
 # <symbol>, separated by tab characters. It indicates that <section1> depends
 # on <section2> to use <symbol>. <symbol-type> is either "u" or "w" for
 # regular undefined or weak undefined, respectively.
 #
 # If you want to obtain dependency information per function granularity,
-# compile source files with the -ffunction-sections compiler flag.)";
+# compile source files with the -ffunction-sections compiler flag.
+)";
 
   auto println = [&](auto &src, Symbol<E> &sym, ElfSym<E> &esym) {
     if (InputSection<E> *isec = sym.get_input_section())
@@ -1011,8 +991,12 @@ void sort_init_fini(Context<E> &ctx) {
         if (ctx.arg.shuffle_sections == SHUFFLE_SECTIONS_REVERSE)
           std::reverse(osec->members.begin(), osec->members.end());
 
+        std::unordered_map<InputSection<E> *, i64> map;
+        for (InputSection<E> *isec : osec->members)
+          map.insert({isec, get_priority(isec)});
+
         sort(osec->members, [&](InputSection<E> *a, InputSection<E> *b) {
-          return get_priority(a) < get_priority(b);
+          return map[a] < map[b];
         });
       }
     }
@@ -1050,8 +1034,12 @@ void sort_ctor_dtor(Context<E> &ctx) {
         if (ctx.arg.shuffle_sections != SHUFFLE_SECTIONS_REVERSE)
           std::reverse(osec->members.begin(), osec->members.end());
 
+        std::unordered_map<InputSection<E> *, i64> map;
+        for (InputSection<E> *isec : osec->members)
+          map.insert({isec, get_priority(isec)});
+
         sort(osec->members, [&](InputSection<E> *a, InputSection<E> *b) {
-          return get_priority(a) < get_priority(b);
+          return map[a] < map[b];
         });
       }
     }
@@ -1247,17 +1235,9 @@ void scan_relocations(Context<E> &ctx) {
   std::vector<Symbol<E> *> syms = flatten(vec);
   ctx.symbol_aux.reserve(syms.size());
 
-  auto add_aux = [&](Symbol<E> *sym) {
-    if (sym->aux_idx == -1) {
-      i64 sz = ctx.symbol_aux.size();
-      sym->aux_idx = sz;
-      ctx.symbol_aux.resize(sz + 1);
-    }
-  };
-
   // Assign offsets in additional tables for each dynamic symbol.
   for (Symbol<E> *sym : syms) {
-    add_aux(sym);
+    sym->add_aux(ctx);
 
     if (sym->is_imported || sym->is_exported)
       ctx.dynsym->add_symbol(ctx, sym);
@@ -1272,7 +1252,7 @@ void scan_relocations(Context<E> &ctx) {
       sym->is_exported = true;
 
       // We can't use .plt.got for a canonical PLT because otherwise
-      // .plt.got and .got would refer each other, resulting in an
+      // .plt.got and .got would refer to each other, resulting in an
       // infinite loop at runtime.
       ctx.plt->add_symbol(ctx, sym);
     } else if (sym->flags & NEEDS_PLT) {
@@ -1292,31 +1272,10 @@ void scan_relocations(Context<E> &ctx) {
       ctx.got->add_tlsdesc_symbol(ctx, sym);
 
     if (sym->flags & NEEDS_COPYREL) {
-      assert(sym->file->is_dso);
-      SharedFile<E> *file = (SharedFile<E> *)sym->file;
-      sym->copyrel_readonly = file->is_readonly(ctx, sym);
-
-      if (sym->copyrel_readonly)
+      if (((SharedFile<E> *)sym->file)->is_readonly(sym))
         ctx.copyrel_relro->add_symbol(ctx, sym);
       else
         ctx.copyrel->add_symbol(ctx, sym);
-
-      // If a symbol needs copyrel, it is considered both imported
-      // and exported.
-      assert(sym->is_imported);
-      sym->is_exported = true;
-
-      // Aliases of this symbol are also copied so that they will be
-      // resolved to the same address at runtime.
-      for (Symbol<E> *alias : file->find_aliases(sym)) {
-        add_aux(alias);
-        alias->is_imported = true;
-        alias->is_exported = true;
-        alias->has_copyrel = true;
-        alias->value = sym->value;
-        alias->copyrel_readonly = sym->copyrel_readonly;
-        ctx.dynsym->add_symbol(ctx, alias);
-      }
     }
 
     if constexpr (is_ppc64v1<E>)
@@ -1544,7 +1503,8 @@ void compute_import_export(Context<E> &ctx) {
     tbb::parallel_for_each(ctx.dsos, [&](SharedFile<E> *file) {
       for (Symbol<E> *sym : file->symbols) {
         if (sym->file && !sym->file->is_dso && sym->visibility != STV_HIDDEN) {
-          if (sym->ver_idx != VER_NDX_LOCAL || !ctx.default_version_from_version_script) {
+          if (sym->ver_idx != VER_NDX_LOCAL ||
+              !ctx.default_version_from_version_script) {
             std::scoped_lock lock(sym->mu);
             sym->is_exported = true;
           }
@@ -2516,7 +2476,6 @@ template void create_output_sections(Context<E> &);
 template void add_synthetic_symbols(Context<E> &);
 template void check_cet_errors(Context<E> &);
 template void print_dependencies(Context<E> &);
-template void print_dependencies_full(Context<E> &);
 template void write_repro_file(Context<E> &);
 template void check_duplicate_symbols(Context<E> &);
 template void check_symbol_types(Context<E> &);

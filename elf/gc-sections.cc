@@ -57,15 +57,14 @@ static void visit(Context<E> &ctx, InputSection<E> *isec,
       continue;
     }
 
-    if (!mark_section(sym.get_input_section()))
-      continue;
-
     // Mark a section alive. For better performacne, we don't call
     // `feeder.add` too often.
-    if (depth < 3)
-      visit(ctx, sym.get_input_section(), feeder, depth + 1);
-    else
-      feeder.add(sym.get_input_section());
+    if (mark_section(sym.get_input_section())) {
+      if (depth < 3)
+        visit(ctx, sym.get_input_section(), feeder, depth + 1);
+      else
+        feeder.add(sym.get_input_section());
+    }
   }
 }
 
@@ -94,10 +93,10 @@ static void collect_root_set(Context<E> &ctx,
       if (!isec || !isec->is_alive)
         continue;
 
-      // -gc-sections discards only SHF_ALLOC sections. If you want to
+      // --gc-sections discards only SHF_ALLOC sections. If you want to
       // reduce the amount of non-memory-mapped segments, you should
       // use `strip` command, compile without debug info or use
-      // -strip-all linker option.
+      // --strip-all linker option.
       u32 flags = isec->shdr().sh_flags;
       if (!(flags & SHF_ALLOC))
         isec->is_visited = true;
@@ -163,26 +162,9 @@ static void sweep(Context<E> &ctx) {
   });
 }
 
-// Non-alloc section fragments are not subject of garbage collection.
-// This function marks such fragments.
-template <typename E>
-static void mark_nonalloc_fragments(Context<E> &ctx) {
-  Timer t(ctx, "mark_nonalloc_fragments");
-
-  tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
-    for (std::unique_ptr<MergeableSection<E>> &m : file->mergeable_sections)
-      if (m)
-        for (SectionFragment<E> *frag : m->fragments)
-          if (!(frag->output_section.shdr.sh_flags & SHF_ALLOC))
-            frag->is_alive.store(true, std::memory_order_relaxed);
-  });
-}
-
 template <typename E>
 void gc_sections(Context<E> &ctx) {
   Timer t(ctx, "gc");
-
-  mark_nonalloc_fragments(ctx);
 
   tbb::concurrent_vector<InputSection<E> *> rootset;
   collect_root_set(ctx, rootset);

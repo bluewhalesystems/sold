@@ -43,6 +43,12 @@ InputFile<E>::InputFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
 }
 
 template <typename E>
+std::span<ElfPhdr<E>> InputFile<E>::get_phdrs() {
+  ElfEhdr<E> &ehdr = get_ehdr();
+  return {(ElfPhdr<E> *)(mf->data + ehdr.e_phoff), ehdr.e_phnum};
+}
+
+template <typename E>
 ElfShdr<E> *InputFile<E>::find_section(i64 type) {
   for (ElfShdr<E> &sec : elf_sections)
     if (sec.sh_type == type)
@@ -708,7 +714,7 @@ void ObjectFile<E>::resolve_section_pieces(Context<E> &ctx) {
     if (m) {
       m->fragments.reserve(m->strings.size());
       for (i64 i = 0; i < m->strings.size(); i++)
-        m->fragments.push_back(m->parent->insert(m->strings[i], m->hashes[i],
+        m->fragments.push_back(m->parent->insert(ctx, m->strings[i], m->hashes[i],
                                                  m->p2align));
 
       // Shrink vectors that we will never use again to reclaim memory.
@@ -1510,7 +1516,7 @@ SharedFile<E>::mark_live_objects(Context<E> &ctx,
 }
 
 template <typename E>
-std::vector<Symbol<E> *> SharedFile<E>::find_aliases(Symbol<E> *sym) {
+std::span<Symbol<E> *> SharedFile<E>::find_aliases(Symbol<E> *sym) {
   assert(sym->file == this);
 
   std::call_once(init_aliases, [&] {
@@ -1526,16 +1532,12 @@ std::vector<Symbol<E> *> SharedFile<E>::find_aliases(Symbol<E> *sym) {
     });
   });
 
-  struct Cmp {
-    bool operator()(Symbol<E> *sym, u64 val) { return sym->esym().st_value < val; }
-    bool operator()(u64 val, Symbol<E> *sym) { return val < sym->esym().st_value; }
-  };
+  auto [begin, end] = std::equal_range(aliases.begin(), aliases.end(), sym,
+                                       [&](Symbol<E> *x, Symbol<E> *y) {
+    return x->esym().st_value < y->esym().st_value;
+  });
 
-  auto [begin, end] =
-    std::equal_range(aliases.begin(), aliases.end(), sym->esym().st_value, Cmp{});
-  std::vector<Symbol<E> *> vec{begin, end};
-  std::erase(vec, sym);
-  return vec;
+  return {&*begin, &*end};
 }
 
 // Infer an alignment of a DSO symbol. An alignment of a symbol in other
@@ -1555,13 +1557,12 @@ i64 SharedFile<E>::get_alignment(Symbol<E> *sym) {
 }
 
 template <typename E>
-bool SharedFile<E>::is_readonly(Context<E> &ctx, Symbol<E> *sym) {
-  ElfPhdr<E> *phdr = this->get_phdr();
+bool SharedFile<E>::is_readonly(Symbol<E> *sym) {
   u64 val = sym->esym().st_value;
 
-  for (i64 i = 0; i < this->get_ehdr().e_phnum; i++)
-    if (phdr[i].p_type == PT_LOAD && !(phdr[i].p_flags & PF_W) &&
-        phdr[i].p_vaddr <= val && val < phdr[i].p_vaddr + phdr[i].p_memsz)
+  for (ElfPhdr<E> &phdr : this->get_phdrs())
+    if (phdr.p_type == PT_LOAD && !(phdr.p_flags & PF_W) &&
+        phdr.p_vaddr <= val && val < phdr.p_vaddr + phdr.p_memsz)
       return true;
   return false;
 }

@@ -52,7 +52,7 @@ include(GNUInstallDirs)
 # Build mold itself using mold if -DMOLD_USE_MOLD=ON
 option(MOLD_USE_MOLD "Use mold to build mold" OFF)
 if(MOLD_USE_MOLD)
-  add_link_options(-fuse-ld=mold)
+  add_link_options(-fuse-ld=mold -Wl,--gdb-index)
 endif()
 
 add_executable(mold)
@@ -65,7 +65,8 @@ if(NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
     -fno-unwind-tables
     -fno-asynchronous-unwind-tables
     -Wno-sign-compare
-    -Wno-unused-function)
+    -Wno-unused-function
+    -ggnu-pubnames)
 endif()
 
 # Build mold with -flto if -DMOLD_LTO=ON
@@ -198,12 +199,16 @@ endif()
 
 # We always use Clang to build mold on Windows. MSVC can't compile mold.
 if(WIN32)
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message(FATAL_ERROR
       "Your compiler is not supported; install Clang from Visual Studio Installer and re-run cmake with '-T clangcl'")
   endif()
 
   target_compile_definitions(mold PRIVATE NOGDI NOMINMAX)
+  if(MINGW)
+    target_compile_definitions(mold PRIVATE _WIN32_WINNT=0xA00)
+    target_link_libraries(mold PRIVATE bcrypt)
+  endif()
 else()
   include(CheckLibraryExists)
   check_library_exists(m pow "" LIBM_FOUND)
@@ -245,7 +250,7 @@ if(NOT HAVE_FULL_ATOMIC_SUPPORT)
 endif()
 
 # Add -pthread
-if(NOT APPLE AND NOT WIN32)
+if(NOT APPLE AND NOT MSVC)
   target_compile_options(mold PRIVATE -pthread)
   target_link_options(mold PRIVATE -pthread)
 endif()
@@ -255,15 +260,15 @@ add_custom_target(git_hash
   COMMAND ${CMAKE_COMMAND}
     -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
     -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/git-hash.cc
-    -P ${CMAKE_SOURCE_DIR}/update-git-hash.cmake
-  DEPENDS update-git-hash.cmake
+    -P ${CMAKE_SOURCE_DIR}/common/update-git-hash.cmake
+  DEPENDS common/update-git-hash.cmake
   BYPRODUCTS git-hash.cc
   VERBATIM)
 
 add_dependencies(mold git_hash)
 
 # Create config.h file
-configure_file(config.h.in config.h)
+configure_file(common/config.h.in config.h)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 # Almost all functions are template in mold which take a target type
@@ -281,19 +286,20 @@ list(APPEND MOLD_ELF_TARGETS
 list(APPEND MOLD_ELF_TEMPLATE_FILES
   elf/cmdline.cc
   elf/dwarf.cc
+  elf/elf-main.cc
   elf/gc-sections.cc
   elf/icf.cc
   elf/input-files.cc
   elf/input-sections.cc
   elf/linker-script.cc
   elf/lto.cc
-  elf/main.cc
   elf/mapfile.cc
   elf/output-chunks.cc
   elf/passes.cc
   elf/relocatable.cc
   elf/subprocess.cc
   elf/thunks.cc
+  elf/tls.cc
   )
 
 list(APPEND MOLD_MACHO_TARGETS X86_64 ARM64)
@@ -335,8 +341,16 @@ endif()
 
 # Add other non-template source files.
 target_sources(mold PRIVATE
-  compress.cc
-  demangle.cc
+  common/compress.cc
+  common/demangle.cc
+  common/filepath.cc
+  common/glob.cc
+  common/hyperloglog.cc
+  common/main.cc
+  common/multi-glob.cc
+  common/perf.cc
+  common/tar.cc
+  common/uuid.cc
   elf/arch-alpha.cc
   elf/arch-arm32.cc
   elf/arch-arm64.cc
@@ -351,16 +365,8 @@ target_sources(mold PRIVATE
   elf/arch-sparc64.cc
   elf/arch-x86-64.cc
   elf/elf.cc
-  filepath.cc
   git-hash.cc
-  glob.cc
-  hyperloglog.cc
-  main.cc
-  multi-glob.cc
-  perf.cc
-  tar.cc
   third-party/rust-demangle/rust-demangle.c
-  uuid.cc
   )
 
 if(MOLD_IS_SOLD)
@@ -439,10 +445,10 @@ if(NOT CMAKE_SKIP_INSTALL_RULES)
       file(CREATE_LINK \${OLD_REL} \$ENV{DESTDIR}\${NEW_ABS} SYMBOLIC)")
   endfunction()
 
-  mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold
-    ${CMAKE_INSTALL_LIBEXECDIR}/mold/ld)
-  mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold
-    ${CMAKE_INSTALL_BINDIR}/ld.mold)
+  mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold${CMAKE_EXECUTABLE_SUFFIX}
+    ${CMAKE_INSTALL_LIBEXECDIR}/mold/ld${CMAKE_EXECUTABLE_SUFFIX})
+  mold_install_relative_symlink(${CMAKE_INSTALL_BINDIR}/mold${CMAKE_EXECUTABLE_SUFFIX}
+    ${CMAKE_INSTALL_BINDIR}/ld.mold${CMAKE_EXECUTABLE_SUFFIX})
   mold_install_relative_symlink(${CMAKE_INSTALL_MANDIR}/man1/mold.1
     ${CMAKE_INSTALL_MANDIR}/man1/ld.mold.1)
 

@@ -1,7 +1,7 @@
 #include "mold.h"
-#include "../archive-file.h"
-#include "../cmdline.h"
-#include "../output-file.h"
+#include "../common/archive-file.h"
+#include "../common/cmdline.h"
+#include "../common/output-file.h"
 
 #include <cstring>
 #include <functional>
@@ -542,10 +542,8 @@ int elf_main(int argc, char **argv) {
   // Beyond this point, no new symbols will be added to the result.
 
   // Handle --print-dependencies
-  if (ctx.arg.print_dependencies == 1)
+  if (ctx.arg.print_dependencies)
     print_dependencies(ctx);
-  else if (ctx.arg.print_dependencies == 2)
-    print_dependencies_full(ctx);
 
   // Handle -repro
   if (ctx.arg.repro)

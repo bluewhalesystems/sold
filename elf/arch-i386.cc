@@ -31,7 +31,7 @@
 // assume that %ebx is set to .got. For PDE, we need to create position-
 // dependent PLT entries which don't use %ebx.
 //
-// https://github.com/rui314/mold/wiki/i386-psabi.pdf
+// https://github.com/rui314/psabi/blob/main/i386.pdf
 
 #include "mold.h"
 
@@ -140,6 +140,7 @@ void write_plt_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
       0xcc,                   // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
+    *(ul32 *)(buf + 5) = sym.get_plt_idx(ctx) * sizeof(ElfRel<E>);
     *(ul32 *)(buf + 11) = sym.get_gotplt_addr(ctx) - ctx.got->shdr.sh_addr;
   } else {
     static const u8 insn[] = {
@@ -149,10 +150,9 @@ void write_plt_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
       0xcc,                   // (padding)
     };
     memcpy(buf, insn, sizeof(insn));
+    *(ul32 *)(buf + 5) = sym.get_plt_idx(ctx) * sizeof(ElfRel<E>);
     *(ul32 *)(buf + 11) = sym.get_gotplt_addr(ctx);
   }
-
-  *(ul32 *)(buf + 5) = sym.get_plt_idx(ctx) * sizeof(ElfRel<E>);
 }
 
 template <>
@@ -200,6 +200,58 @@ static u32 relax_got32x(u8 *loc) {
   if (loc[0] == 0x8b)
     return 0x8d00 | loc[1];
   return 0;
+}
+
+// Relax GD to LE
+static void relax_gd_to_le(u8 *loc, ElfRel<E> rel, u64 val) {
+  static const u8 insn[] = {
+    0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
+    0x81, 0xc0, 0, 0, 0, 0, // add $tp_offset, %eax
+  };
+
+  switch (rel.r_type) {
+  case R_386_PLT32:
+  case R_386_PC32:
+    memcpy(loc - 3, insn, sizeof(insn));
+    *(ul32 *)(loc + 5) = val;
+    break;
+  case R_386_GOT32:
+  case R_386_GOT32X:
+    memcpy(loc - 2, insn, sizeof(insn));
+    *(ul32 *)(loc + 6) = val;
+    break;
+  default:
+    unreachable();
+  }
+}
+
+// Relax LD to LE
+static void relax_ld_to_le(u8 *loc, ElfRel<E> rel, u64 val) {
+  switch (rel.r_type) {
+  case R_386_PLT32:
+  case R_386_PC32: {
+    static const u8 insn[] = {
+      0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
+      0x2d, 0, 0, 0, 0,       // sub $tls_size, %eax
+    };
+    memcpy(loc - 2, insn, sizeof(insn));
+    *(ul32 *)(loc + 5) = val;
+    break;
+  }
+  case R_386_GOT32:
+  case R_386_GOT32X: {
+    static const u8 insn[] = {
+      0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
+      0x2d, 0, 0, 0, 0,       // sub $tls_size, %eax
+      0x90,                   // nop
+    };
+    memcpy(loc - 2, insn, sizeof(insn));
+    *(ul32 *)(loc + 5) = val;
+    break;
+  }
+  default:
+    unreachable();
+  }
 }
 
 template <>
@@ -289,32 +341,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       if (sym.has_tlsgd(ctx)) {
         *(ul32 *)loc = sym.get_tlsgd_addr(ctx) + A - GOT;
       } else {
-        // Relax GD to LE
-        switch (rels[i + 1].r_type) {
-        case R_386_PLT32:
-        case R_386_PC32: {
-          static const u8 insn[] = {
-            0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
-            0x81, 0xe8, 0, 0, 0, 0, // sub $val, %eax
-          };
-          memcpy(loc - 3, insn, sizeof(insn));
-          *(ul32 *)(loc + 5) = ctx.tp_addr - S - A;
-          break;
-        }
-        case R_386_GOT32:
-        case R_386_GOT32X: {
-          static const u8 insn[] = {
-            0x65, 0xa1, 0, 0, 0, 0, // mov %gs:0, %eax
-            0x81, 0xe8, 0, 0, 0, 0, // sub $val, %eax
-          };
-          memcpy(loc - 2, insn, sizeof(insn));
-          *(ul32 *)(loc + 6) = ctx.tp_addr - S - A;
-          break;
-        }
-        default:
-          unreachable();
-        }
-
+        relax_gd_to_le(loc, rels[i + 1], S - ctx.tp_addr);
         i++;
       }
       break;
@@ -322,34 +349,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       if (ctx.got->has_tlsld(ctx)) {
         *(ul32 *)loc = ctx.got->get_tlsld_addr(ctx) + A - GOT;
       } else {
-        // Relax LD to LE
-        switch (rels[i + 1].r_type) {
-        case R_386_PLT32:
-        case R_386_PC32: {
-          static const u8 insn[] = {
-            0x31, 0xc0,             // xor %eax, %eax
-            0x65, 0x8b, 0x00,       // mov %gs:(%eax), %eax
-            0x81, 0xe8, 0, 0, 0, 0, // sub $tls_size, %eax
-          };
-          memcpy(loc - 2, insn, sizeof(insn));
-          break;
-        }
-        case R_386_GOT32:
-        case R_386_GOT32X: {
-          static const u8 insn[] = {
-            0x31, 0xc0,             // xor %eax, %eax
-            0x65, 0x8b, 0x00,       // mov %gs:(%eax), %eax
-            0x81, 0xe8, 0, 0, 0, 0, // sub $tls_size, %eax
-            0x90,                   // nop
-          };
-          memcpy(loc - 2, insn, sizeof(insn));
-          break;
-        }
-        default:
-          unreachable();
-        }
-
-        *(ul32 *)(loc + 5) = ctx.tp_addr - ctx.tls_begin;
+        relax_ld_to_le(loc, rels[i + 1], ctx.tp_addr - ctx.tls_begin);
         i++;
       }
       break;
@@ -504,8 +504,10 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
       break;
     case R_386_GOT32X: {
-      bool do_relax = ctx.arg.relax && !sym.is_imported &&
-                      sym.is_relative() && relax_got32x(loc - 2);
+      // We always want to relax GOT32X because static PIE doesn't
+      // work without it.
+      bool do_relax = !sym.is_imported && sym.is_relative() &&
+                      relax_got32x(loc - 2);
       if (!do_relax)
         sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
       break;
@@ -528,7 +530,10 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
           ty != R_386_GOT32 && ty != R_386_GOT32X)
         Fatal(ctx) << *this << ": TLS_GD reloc must be followed by PLT or GOT32";
 
-      if (relax_tlsgd(ctx, sym))
+      // We always relax if -static because libc.a doesn't contain
+      // __tls_get_addr().
+      if (ctx.arg.is_static ||
+          (ctx.arg.relax && !ctx.arg.shared && !sym.is_imported))
         i++;
       else
         sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
@@ -542,7 +547,9 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
           ty != R_386_GOT32 && ty != R_386_GOT32X)
         Fatal(ctx) << *this << ": TLS_LDM reloc must be followed by PLT or GOT32";
 
-      if (relax_tlsld(ctx))
+      // We always relax if -static because libc.a doesn't contain
+      // __tls_get_addr().
+      if (ctx.arg.is_static || (ctx.arg.relax && !ctx.arg.shared))
         i++;
       else
         ctx.needs_tlsld.store(true, std::memory_order_relaxed);

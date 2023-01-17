@@ -10,9 +10,10 @@
 //
 // The function descriptor is essentially a pair of a function entry point
 // address and a value that should be set to %r2 before calling that
-// function. There is actually a third member, but we don't need to know
-// what that is. In total, the function descriptor is 24 bytes long. Here
-// is why we need it.
+// function. There is also a third member for "the environment pointer for
+// languages such as Pascal and PL/1" according to the psABI, but it looks
+// like no one acutally uses it. In total, the function descriptor is 24
+// bytes long. Here is why we need it.
 //
 // PPC generally lacks PC-relative data access instructions. Position-
 // independent code sets GOT + 0x8000 to %r2 and access global variables
@@ -41,6 +42,8 @@
 // In PPCV1, it may have an OPD address in addition to these. OPD address
 // is used for relocations that refers the address of a function as a
 // function pointer.
+//
+// https://github.com/rui314/psabi/blob/main/ppc64v1.pdf
 
 #include "mold.h"
 
@@ -56,10 +59,6 @@ static u64 hi(u64 x)       { return x >> 16; }
 static u64 ha(u64 x)       { return (x + 0x8000) >> 16; }
 static u64 high(u64 x)     { return (x >> 16) & 0xffff; }
 static u64 higha(u64 x)    { return ((x + 0x8000) >> 16) & 0xffff; }
-static u64 higher(u64 x)   { return (x >> 32) & 0xffff; }
-static u64 highera(u64 x)  { return ((x + 0x8000) >> 32) & 0xffff; }
-static u64 highest(u64 x)  { return x >> 48; }
-static u64 highesta(u64 x) { return (x + 0x8000) >> 48; }
 
 // .plt is used only for lazy symbol resolution on PPC64. All PLT
 // calls are made via range extension thunks even if they are within
@@ -93,9 +92,35 @@ void write_plt_header(Context<E> &ctx, u8 *buf) {
 
 template <>
 void write_plt_entry(Context<E> &ctx, u8 *buf, Symbol<E> &sym) {
-  i64 offset = ctx.plt->shdr.sh_addr - sym.get_plt_addr(ctx) - 4;
-  *(ub32 *)(buf + 0) = 0x3800'0000 | sym.get_plt_idx(ctx);   // li %r0, PLT_INDEX
-  *(ub32 *)(buf + 4) = 0x4b00'0000 | (offset & 0x00ff'ffff); // b  plt0
+  ub32 *loc = (ub32 *)buf;
+  i64 idx = sym.get_plt_idx(ctx);
+
+  // The PPC64 ELFv1 ABI requires PLT entries to be vary in size depending
+  // on their indices. Unlike other targets, .got.plt is filled not by us
+  // but by the loader, so we don't have a control over where the initial
+  // call to the PLT entry jumps to. So we need to strictly follow the PLT
+  // section layout as the loader expect it to be.
+  if (idx < 0x8000) {
+    static const ub32 insn[] = {
+      0x3800'0000, // li      r0, PLT_INDEX
+      0x4b00'0000, // b       plt0
+    };
+
+    memcpy(loc, insn, sizeof(insn));
+    loc[0] |= idx;
+    loc[1] |= (ctx.plt->shdr.sh_addr - sym.get_plt_addr(ctx) - 4) & 0x00ff'ffff;
+  } else {
+    static const ub32 insn[] = {
+      0x3c00'0000, // lis     r0, PLT_INDEX@high
+      0x6000'0000, // ori     r0, r0, PLT_INDEX@lo
+      0x4b00'0000, // b       plt0
+    };
+
+    memcpy(loc, insn, sizeof(insn));
+    loc[0] |= high(idx);
+    loc[1] |= lo(idx);
+    loc[2] |= (ctx.plt->shdr.sh_addr - sym.get_plt_addr(ctx) - 8) & 0x00ff'ffff;
+  }
 }
 
 // .plt.got is not necessary on PPC64 because range extension thunks
@@ -169,12 +194,10 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_PPC64_TOC16_LO:
       *(ub16 *)loc = lo(S + A - TOC);
       break;
-    case R_PPC64_TOC16_DS: {
-      i64 val = S + A - TOC;
-      check(val, -(1 << 15), 1 << 15);
-      *(ub16 *)loc |= val & 0xfffc;
+    case R_PPC64_TOC16_DS:
+      check(S + A - TOC, -(1 << 15), 1 << 15);
+      *(ub16 *)loc |= (S + A - TOC) & 0xfffc;
       break;
-    }
     case R_PPC64_TOC16_LO_DS:
       *(ub16 *)loc |= (S + A - TOC) & 0xfffc;
       break;

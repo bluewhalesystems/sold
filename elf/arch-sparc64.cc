@@ -54,8 +54,7 @@
 // This scheme is very similar to i386. That may not be a coincidence
 // because the i386 ELF psABI is created by Sun Microsystems too.
 //
-// https://docs.oracle.com/cd/E36784_01/html/E36857/chapter6-62988.html
-// https://docs.oracle.com/cd/E19120-01/open.solaris/819-0690/chapter8-40/index.html
+// https://github.com/rui314/psabi/blob/main/sparc.pdf
 
 #include "mold.h"
 
@@ -370,12 +369,16 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       *(ub32 *)loc |= bits(sym.get_tlsgd_addr(ctx) + A - GOT, 9, 0);
       break;
     case R_SPARC_TLS_GD_CALL:
-    case R_SPARC_TLS_LDM_CALL:
+    case R_SPARC_TLS_LDM_CALL: {
+      u64 addr;
       if (ctx.arg.is_static)
-        *(ub32 *)loc |= bits(ctx.extra.tls_get_addr->shdr.sh_addr + A - P, 31, 2);
+        addr = ctx.extra.tls_get_addr_sec->shdr.sh_addr;
       else
-        *(ub32 *)loc |= bits(ctx.tls_get_addr->get_addr(ctx) + A - P, 31, 2);
+        addr = ctx.extra.tls_get_addr_sym->get_addr(ctx);
+
+      *(ub32 *)loc |= bits(addr + A - P, 31, 2);
       break;
+    }
     case R_SPARC_TLS_LDM_HI22:
       *(ub32 *)loc |= bits(ctx.got->get_tlsld_addr(ctx) + A - GOT, 31, 10);
       break;
@@ -575,8 +578,9 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       break;
     case R_SPARC_TLS_GD_CALL:
     case R_SPARC_TLS_LDM_CALL:
-      if (!ctx.arg.is_static && ctx.tls_get_addr->is_imported)
-        ctx.tls_get_addr->flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
+      if (!ctx.arg.is_static && ctx.extra.tls_get_addr_sym->is_imported)
+        ctx.extra.tls_get_addr_sym->flags.fetch_or(NEEDS_PLT,
+                                                   std::memory_order_relaxed);
       break;
     case R_SPARC_GOTDATA_OP_LOX10:
     case R_SPARC_GOTDATA_OP:
