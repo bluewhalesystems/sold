@@ -181,9 +181,7 @@ private:
 
   void parse_tapi(Context<E> &ctx);
   void parse_dylib(Context<E> &ctx);
-
-  void read_trie(Context<E> &ctx, u8 *start, i64 offset = 0,
-                 const std::string &prefix = "");
+  void read_trie(Context<E> &ctx, u8 *start, i64 offset, const std::string &prefix);
 
   std::vector<bool> is_weak_symbol;
 };

@@ -1050,16 +1050,28 @@ void DylibFile<E>::read_trie(Context<E> &ctx, u8 *start, i64 offset,
   if (*buf) {
     read_uleb(buf); // size
     i64 flags = read_uleb(buf) & ~EXPORT_SYMBOL_FLAGS_KIND_MASK;
-    read_uleb(buf); // addr
-
     std::string_view name = save_string(ctx, prefix);
+
+    if (flags & EXPORT_SYMBOL_FLAGS_REEXPORT) {
+      read_uleb(buf); // skip a library ordinal
+      std::string_view str((char *)buf);
+      buf += str.size() + 1;
+      if (!str.empty())
+        name = str;
+    } else if (flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) {
+      name = save_string(ctx, prefix);
+      read_uleb(buf); // stub offset
+      read_uleb(buf); // resolver offset
+    } else {
+      name = save_string(ctx, prefix);
+      read_uleb(buf); // addr
+    }
+
     if (flags & EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION)
       weak_exports.insert(name);
     else
       exports.insert(name);
 
-    if (flags & EXPORT_SYMBOL_FLAGS_REEXPORT)
-      read_uleb(buf); // skip a library ordinal
   } else {
     buf++;
   }
@@ -1105,12 +1117,12 @@ void DylibFile<E>::parse_dylib(Context<E> &ctx) {
     case LC_DYLD_INFO_ONLY: {
       DyldInfoCommand &cmd = *(DyldInfoCommand *)p;
       if (cmd.export_off)
-        read_trie(ctx, this->mf->data + cmd.export_off);
+        read_trie(ctx, this->mf->data + cmd.export_off, 0, "");
       break;
     }
     case LC_DYLD_EXPORTS_TRIE: {
       LinkEditDataCommand &cmd = *(LinkEditDataCommand *)p;
-      read_trie(ctx, this->mf->data + cmd.dataoff);
+      read_trie(ctx, this->mf->data + cmd.dataoff, 0, "");
       break;
     }
     case LC_REEXPORT_DYLIB:
