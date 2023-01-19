@@ -538,9 +538,10 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
     u8 *loc = base + rel.r_offset;
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
@@ -635,15 +636,16 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
     u8 *loc = (u8 *)(contents.data() + rel.r_offset);
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
 
     if (sym.is_ifunc())
-      sym.flags.fetch_or(NEEDS_GOT | NEEDS_PLT, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOT | NEEDS_PLT;
 
     switch (rel.r_type) {
     case R_X86_64_8:
@@ -667,7 +669,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_X86_64_GOTPC64:
     case R_X86_64_GOTPCREL:
     case R_X86_64_GOTPCREL64:
-      sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOT;
       break;
     case R_X86_64_GOTPCRELX: {
       if (rel.r_addend != -4)
@@ -678,7 +680,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       bool do_relax = !sym.is_imported && sym.is_relative() &&
                       relax_gotpcrelx(loc - 2);
       if (!do_relax)
-        sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_GOT;
       break;
     }
     case R_X86_64_REX_GOTPCRELX: {
@@ -688,13 +690,13 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       bool do_relax = !sym.is_imported && sym.is_relative() &&
                       relax_rex_gotpcrelx(loc - 3);
       if (!do_relax)
-        sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_GOT;
       break;
     }
     case R_X86_64_PLT32:
     case R_X86_64_PLTOFF64:
       if (sym.is_imported)
-        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_PLT;
       break;
     case R_X86_64_TLSGD:
       if (rel.r_addend != -4)
@@ -716,10 +718,10 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
         i++;
       } else if (ctx.arg.relax && !sym.is_imported && ctx.arg.shared &&
                  !ctx.arg.z_dlopen) {
-        sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
+        sym.flags |= NEEDS_GOTTP;
         i++;
       } else {
-        sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
+        sym.flags |= NEEDS_TLSGD;
       }
       break;
     case R_X86_64_TLSLD:
@@ -740,18 +742,18 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       if (ctx.arg.is_static || (ctx.arg.relax && !ctx.arg.shared))
         i++;
       else
-        ctx.needs_tlsld.store(true, std::memory_order_relaxed);
+        ctx.needs_tlsld = true;
       break;
     case R_X86_64_GOTTPOFF: {
       if (rel.r_addend != -4)
         Fatal(ctx) << *this << ": bad r_addend for R_X86_64_GOTTPOFF";
 
-      ctx.has_gottp_rel.store(true, std::memory_order_relaxed);
+      ctx.has_gottp_rel = true;
 
       bool do_relax = ctx.arg.relax && !ctx.arg.shared &&
                       !sym.is_imported && relax_gottpoff(loc - 3);
       if (!do_relax)
-        sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
+        sym.flags |= NEEDS_GOTTP;
       break;
     }
     case R_X86_64_GOTPC32_TLSDESC: {
@@ -763,7 +765,7 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
                    << " against an invalid code sequence";
 
       if (!relax_tlsdesc(ctx, sym))
-        sym.flags.fetch_or(NEEDS_TLSDESC, std::memory_order_relaxed);
+        sym.flags |= NEEDS_TLSDESC;
       break;
     }
     case R_X86_64_GOTOFF64:

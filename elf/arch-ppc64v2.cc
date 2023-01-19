@@ -59,11 +59,11 @@ namespace mold::elf {
 
 using E = PPC64V2;
 
-static u64 lo(u64 x)       { return x & 0xffff; }
-static u64 hi(u64 x)       { return x >> 16; }
-static u64 ha(u64 x)       { return (x + 0x8000) >> 16; }
-static u64 high(u64 x)     { return (x >> 16) & 0xffff; }
-static u64 higha(u64 x)    { return ((x + 0x8000) >> 16) & 0xffff; }
+static u64 lo(u64 x)    { return x & 0xffff; }
+static u64 hi(u64 x)    { return x >> 16; }
+static u64 ha(u64 x)    { return (x + 0x8000) >> 16; }
+static u64 high(u64 x)  { return (x >> 16) & 0xffff; }
+static u64 higha(u64 x) { return ((x + 0x8000) >> 16) & 0xffff; }
 
 // .plt is used only for lazy symbol resolution on PPC64. All PLT
 // calls are made via range extension thunks even if they are within
@@ -284,9 +284,10 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
     u8 *loc = base + rel.r_offset;
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
@@ -342,14 +343,15 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
 
     if (sym.is_ifunc())
-      sym.flags.fetch_or(NEEDS_GOT | NEEDS_PLT, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOT | NEEDS_PLT;
 
     switch (rel.r_type) {
     case R_PPC64_ADDR64:
@@ -359,20 +361,20 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
         scan_dyn_absrel(ctx, sym, rel);
       break;
     case R_PPC64_GOT_TPREL16_HA:
-      sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOTTP;
       break;
     case R_PPC64_REL24:
       if (sym.is_imported)
-        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_PLT;
       break;
     case R_PPC64_PLT16_HA:
-      sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOT;
       break;
     case R_PPC64_GOT_TLSGD16_HA:
-      sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
+      sym.flags |= NEEDS_TLSGD;
       break;
     case R_PPC64_GOT_TLSLD16_HA:
-      ctx.needs_tlsld.store(true, std::memory_order_relaxed);
+      ctx.needs_tlsld = true;
       break;
     case R_PPC64_REL64:
     case R_PPC64_TOC16_HA:

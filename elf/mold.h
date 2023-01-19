@@ -71,8 +71,8 @@ struct SectionFragment {
 
   MergedSection<E> &output_section;
   u32 offset = -1;
-  std::atomic_uint8_t p2align = 0;
-  std::atomic_bool is_alive = false;
+  Atomic<u8> p2align = 0;
+  Atomic<bool> is_alive = false;
 };
 
 // Additional class members for dynamic symbols. Because most symbols
@@ -226,7 +226,7 @@ struct FdeRecord {
   u32 output_offset = -1;
   u32 rel_idx = -1;
   u16 cie_idx = -1;
-  std::atomic_bool is_alive = true;
+  Atomic<bool> is_alive = true;
 };
 
 // A struct to hold target-dependent input section members.
@@ -329,9 +329,6 @@ private:
 
   std::optional<u64> get_tombstone(Symbol<E> &sym, SectionFragment<E> *frag);
 };
-
-template <typename E>
-void report_undef_errors(Context<E> &ctx);
 
 //
 // tls.cc
@@ -1219,10 +1216,7 @@ public:
   void mark_live_objects(Context<E> &ctx,
                          std::function<void(InputFile<E> *)> feeder) override;
   void convert_undefined_weak_symbols(Context<E> &ctx);
-  void resolve_comdat_groups();
   void mark_addrsig(Context<E> &ctx);
-  void eliminate_duplicate_comdat_groups();
-  void claim_unresolved_symbols(Context<E> &ctx);
   void scan_relocations(Context<E> &ctx);
   void convert_common_symbols(Context<E> &ctx);
   void compute_symtab_size(Context<E> &ctx);
@@ -1238,7 +1232,7 @@ public:
   std::vector<ElfShdr<E>> elf_sections2;
   std::vector<CieRecord<E>> cies;
   std::vector<FdeRecord<E>> fdes;
-  std::vector<const char *> symvers;
+  BitVector has_symver;
   std::vector<ComdatGroupRef<E>> comdat_groups;
   bool exclude_libs = false;
   std::map<u32, u32> gnu_properties;
@@ -1435,6 +1429,7 @@ template <typename E> void claim_unresolved_symbols(Context<E> &);
 template <typename E> void scan_relocations(Context<E> &);
 template <typename E> void construct_relr(Context<E> &);
 template <typename E> void create_output_symtab(Context<E> &);
+template <typename E> void report_undef_errors(Context<E> &);
 template <typename E> void create_reloc_sections(Context<E> &);
 template <typename E> void copy_chunks(Context<E> &);
 template <typename E> void apply_version_script(Context<E> &);
@@ -2042,10 +2037,10 @@ public:
   u16 ver_idx = 0;
 
   // `flags` has NEEDS_ flags.
-  std::atomic_uint8_t flags = 0;
+  Atomic<u8> flags = 0;
 
   tbb::spin_mutex mu;
-  std::atomic_uint8_t visibility = STV_DEFAULT;
+  Atomic<u8> visibility = STV_DEFAULT;
 
   bool is_weak : 1 = false;
   bool write_to_symtab : 1 = false; // for --strip-all and the like
@@ -2828,6 +2823,30 @@ inline bool relax_tlsdesc(Context<E> &ctx, Symbol<E> &sym) {
   if (ctx.arg.is_static)
     return true;
   return ctx.arg.relax && !ctx.arg.shared && !sym.is_imported;
+}
+
+// Returns true if esym has already been resolved.
+template <typename E>
+bool is_resolved(Symbol<E> &sym, const ElfSym<E> &esym) {
+  assert(sym.file);
+
+  // A non-weak undefined symbol must be promoted to an imported
+  // symbol or resolved to an defined symbol. Otherwise, it's an
+  // undefined symbol error.
+  //
+  // Every ELF file has an absolute local symbol as its first symbol.
+  // Referring to that symbol is always valid.
+  bool is_undef = esym.is_undef() && !esym.is_weak() && sym.sym_idx;
+  if (!sym.is_imported && is_undef && sym.esym().is_undef())
+    return false;
+
+  // If a protected/hidden undefined symbol is resolved to other .so,
+  // it's handled as if no symbols were found.
+  if (sym.file->is_dso &&
+      (sym.visibility == STV_PROTECTED || sym.visibility == STV_HIDDEN))
+    return false;
+
+  return true;
 }
 
 } // namespace mold::elf

@@ -56,20 +56,10 @@ ElfShdr<E> *InputFile<E>::find_section(i64 type) {
   return nullptr;
 }
 
-// This function is actually racy, in that "tearing" might be observed
-// during the read or write of `sym->file`. However, on most platforms
-// read/write of pointers never tears, and even if it did, it would be
-// harmless, as `sym->file` will not become equal to `sym`, or even if
-// it did by chance, we just wipe a symbol twice.
-//
-// Doing this in a standard-compliant way is too cumbersome, hence
-// here we just pretend a compiler will never optimize this into a
-// form that actually exploits the UB.
 template <typename E>
-__attribute__((no_sanitize("thread")))
 void InputFile<E>::clear_symbols() {
   for (Symbol<E> *sym : get_global_syms())
-    if (sym->file == this)
+    if (__atomic_load_n(&sym->file, __ATOMIC_RELAXED) == this)
       sym->clear();
 }
 
@@ -496,7 +486,7 @@ void ObjectFile<E>::initialize_symbols(Context<E> &ctx) {
   this->symbols.resize(this->elf_syms.size());
 
   i64 num_globals = this->elf_syms.size() - this->first_global;
-  symvers.resize(num_globals);
+  has_symver.resize(num_globals);
 
   for (i64 i = 0; i < this->first_global; i++)
     this->symbols[i] = &this->local_syms[i];
@@ -511,14 +501,13 @@ void ObjectFile<E>::initialize_symbols(Context<E> &ctx) {
 
     // Parse symbol version after atsign
     if (i64 pos = name.find('@'); pos != name.npos) {
-      std::string_view ver = name.substr(pos + 1);
+      std::string_view ver = name.substr(pos);
       name = name.substr(0, pos);
 
-      if (!ver.empty() && ver != "@") {
-        if (ver.starts_with('@'))
+      if (ver != "@" && ver != "@@") {
+        if (ver.starts_with("@@"))
           key = name;
-        if (!esym.is_undef())
-          symvers[i - this->first_global] = ver.data();
+        has_symver.set(i - this->first_global);
       }
     }
 
@@ -860,22 +849,22 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
 //
 // Ties are broken by file priority.
 template <typename E>
-static u64 get_rank(InputFile<E> *file, const ElfSym<E> &esym, bool is_lazy) {
-  if (esym.is_common()) {
-    assert(!file->is_dso);
-    if (is_lazy)
-      return (6 << 24) + file->priority;
-    return (5 << 24) + file->priority;
-  }
+static u64 get_rank(InputFile<E> *file, const ElfSym<E> &esym, bool is_in_archive) {
+  auto get_sym_rank = [&] {
+    if (esym.is_common()) {
+      assert(!file->is_dso);
+      return is_in_archive ? 6 : 5;
+    }
 
-  if (file->is_dso || is_lazy) {
+    if (file->is_dso || is_in_archive)
+      return (esym.st_bind == STB_WEAK) ? 4 : 3;
+
     if (esym.st_bind == STB_WEAK)
-      return (4 << 24) + file->priority;
-    return (3 << 24) + file->priority;
-  }
-  if (esym.st_bind == STB_WEAK)
-    return (2 << 24) + file->priority;
-  return (1 << 24) + file->priority;
+      return 2;
+    return 1;
+  };
+
+  return (get_sym_rank() << 24) + file->priority;
 }
 
 template <typename E>
@@ -987,135 +976,6 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
         SyncOut(ctx) << "trace-symbol: " << *this << " keeps " << *sym.file
                      << " for " << sym;
     }
-  }
-}
-
-// Comdat groups are used to de-duplicate functions and data that may
-// be included into multiple object files. C++ compiler uses comdat
-// groups to de-duplicate instantiated templates.
-//
-// For example, if a compiler decides to instantiate `std::vector<int>`,
-// it generates code and data for `std::vector<int>` and put them into a
-// comdat group whose name is the mangled name of `std::vector<int>`.
-// The instantiation may happen multiple times for different translation
-// units. Then linker de-duplicates them so that the resulting executable
-// contains only a single copy of `std::vector<int>`.
-template <typename E>
-void ObjectFile<E>::resolve_comdat_groups() {
-  for (ComdatGroupRef<E> &ref : comdat_groups)
-    update_minimum(ref.group->owner, this->priority);
-}
-
-template <typename E>
-void ObjectFile<E>::eliminate_duplicate_comdat_groups() {
-  for (ComdatGroupRef<E> &ref : comdat_groups)
-    if (ref.group->owner != this->priority)
-      for (u32 i : ref.members)
-        if (sections[i])
-          sections[i]->kill();
-}
-
-template <typename E>
-void ObjectFile<E>::claim_unresolved_symbols(Context<E> &ctx) {
-  if (!this->is_alive)
-    return;
-
-  auto report_undef = [&](Symbol<E> &sym) {
-    std::stringstream ss;
-    if (std::string_view source = this->get_source_name(); !source.empty())
-      ss << ">>> referenced by " << source << "\n";
-    else
-      ss << ">>> referenced by " << *this << "\n";
-
-    typename decltype(ctx.undef_errors)::accessor acc;
-    ctx.undef_errors.insert(acc, {sym.name(), {}});
-    acc->second.push_back(ss.str());
-  };
-
-  for (i64 i = this->first_global; i < this->elf_syms.size(); i++) {
-    const ElfSym<E> &esym = this->elf_syms[i];
-    Symbol<E> &sym = *this->symbols[i];
-    if (!esym.is_undef())
-      continue;
-
-    std::scoped_lock lock(sym.mu);
-
-    // If a protected/hidden undefined symbol is resolved to an
-    // imported symbol, it's handled as if no symbols were found.
-    if (sym.file && sym.file->is_dso &&
-        (sym.visibility == STV_PROTECTED || sym.visibility == STV_HIDDEN)) {
-      report_undef(sym);
-      continue;
-    }
-
-    if (sym.file &&
-        (!sym.esym().is_undef() || sym.file->priority <= this->priority))
-      continue;
-
-    // If a symbol name is in the form of "foo@version", search for
-    // symbol "foo" and check if the symbol has version "version".
-    std::string_view key = this->symbol_strtab.data() + esym.st_name;
-    if (i64 pos = key.find('@'); pos != key.npos) {
-      Symbol<E> *sym2 = get_symbol(ctx, key.substr(0, pos));
-      if (sym2->file && sym2->file->is_dso &&
-          sym2->get_version() == key.substr(pos + 1)) {
-        this->symbols[i] = sym2;
-        continue;
-      }
-    }
-
-    auto claim = [&](bool is_imported) {
-      if (sym.is_traced)
-        SyncOut(ctx) << "trace-symbol: " << *this << ": unresolved"
-                     << (esym.is_weak() ? " weak" : "")
-                     << " symbol " << sym;
-
-      sym.file = this;
-      sym.origin = 0;
-      sym.value = 0;
-      sym.sym_idx = i;
-      sym.is_weak = false;
-      sym.is_imported = is_imported;
-      sym.is_exported = false;
-      sym.ver_idx = is_imported ? 0 : ctx.default_version;
-    };
-
-    if (esym.is_undef_weak()) {
-      if (ctx.arg.shared && sym.visibility != STV_HIDDEN &&
-          ctx.arg.z_dynamic_undefined_weak) {
-        // Global weak undefined symbols are promoted to dynamic symbols
-        // when when linking a DSO, unless `-z nodynamic_undefined_weak`
-        // was given.
-        claim(true);
-      } else {
-        // Otherwise, weak undefs are converted to absolute symbols with value 0.
-        claim(false);
-      }
-      continue;
-    }
-
-    if (ctx.arg.unresolved_symbols == UNRESOLVED_WARN)
-      report_undef(sym);
-
-    // Traditionally, remaining undefined symbols cause a link failure
-    // only when we are creating an executable. Undefined symbols in
-    // shared objects are promoted to dynamic symbols, so that they'll
-    // get another chance to be resolved at run-time. You can change the
-    // behavior by passing `-z defs` to the linker.
-    //
-    // Even if `-z defs` is given, weak undefined symbols are still
-    // promoted to dynamic symbols for compatibility with other linkers.
-    // Some major programs, notably Firefox, depend on the behavior
-    // (they use this loophole to export symbols from libxul.so).
-    if (ctx.arg.shared && sym.visibility != STV_HIDDEN &&
-        (!ctx.arg.z_defs || ctx.arg.unresolved_symbols != UNRESOLVED_ERROR)) {
-      claim(true);
-      continue;
-    }
-
-    // Convert remaining undefined symbols to absolute symbols with value 0.
-    if (ctx.arg.unresolved_symbols != UNRESOLVED_ERROR || ctx.arg.noinhibit_exec)
-      claim(false);
   }
 }
 

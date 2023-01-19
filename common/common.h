@@ -40,6 +40,11 @@
 # define unreachable() assert(0 && "unreachable")
 #endif
 
+// __builtin_assume() is supported only by clang, and [[assume]] is
+// available only in C++23, so we use this macro when giving a hint to
+// the compiler's optimizer what's true.
+#define ASSUME(x) do { if (!(x)) __builtin_unreachable(); } while (0)
+
 inline uint64_t hash_string(std::string_view str) {
   return XXH3_64bits(str.data(), str.size());
 }
@@ -179,6 +184,49 @@ public:
 
 private:
   SyncOut<Context> out;
+};
+
+//
+// Atomics
+//
+
+// This is the same as std::atomic except that the default memory
+// order is relaxed instead of sequential consistency.
+template <typename T>
+struct Atomic : std::atomic<T> {
+  static constexpr std::memory_order relaxed = std::memory_order_relaxed;
+
+  using std::atomic<T>::atomic;
+
+  void operator=(T val) { store(val); }
+  operator T() const { return load(); }
+
+  void store(T val, std::memory_order order = relaxed) {
+    std::atomic<T>::store(val, order);
+  }
+
+  T load(std::memory_order order = relaxed) const {
+    return std::atomic<T>::load(order);
+  }
+
+  T operator|=(T val) { return std::atomic<T>::fetch_or(val, relaxed); }
+};
+
+//
+// Bit vector
+//
+
+class BitVector {
+public:
+  BitVector() = default;
+  BitVector(u32 size) : vec((size + 7) / 8) {}
+
+  void resize(u32 size) { vec.resize((size + 7) / 8); }
+  bool get(u32 idx) const { return vec[idx / 8] & (1 << (idx % 8)); }
+  void set(u32 idx) { vec[idx / 8] |= 1 << (idx % 8); }
+
+private:
+  std::vector<u8> vec;
 };
 
 //

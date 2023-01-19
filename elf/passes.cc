@@ -221,11 +221,16 @@ void do_resolve_symbols(Context<E> &ctx) {
     Timer t(ctx, "eliminate_comdats");
 
     tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
-      file->resolve_comdat_groups();
+      for (ComdatGroupRef<E> &ref : file->comdat_groups)
+        update_minimum(ref.group->owner, file->priority);
     });
 
     tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
-      file->eliminate_duplicate_comdat_groups();
+      for (ComdatGroupRef<E> &ref : file->comdat_groups)
+        if (ref.group->owner != file->priority)
+          for (u32 i : ref.members)
+            if (file->sections[i])
+              file->sections[i]->kill();
     });
   }
 
@@ -618,7 +623,7 @@ void create_internal_file(Context<E> &ctx) {
       add(get_symbol(ctx, ord.name));
 
   obj->elf_syms = ctx.internal_esyms;
-  obj->symvers.resize(ctx.internal_esyms.size() - 1);
+  obj->has_symver.resize(ctx.internal_esyms.size() - 1);
 }
 
 template <typename E>
@@ -731,7 +736,7 @@ void add_synthetic_symbols(Context<E> &ctx) {
   }
 
   obj.elf_syms = ctx.internal_esyms;
-  obj.symvers.resize(ctx.internal_esyms.size() - 1);
+  obj.has_symver.resize(ctx.internal_esyms.size() - 1);
 
   obj.resolve_symbols(ctx);
 
@@ -1198,11 +1203,94 @@ void compute_section_sizes(Context<E> &ctx) {
         osec->shdr.sh_addralign = std::max<u32>(osec->shdr.sh_addralign, align);
 }
 
+// Find all unresolved symbols and attach them to the most appropriate files.
+// Note that even a symbol that will be reported as an undefined symbol will
+// get an owner file in this function. Such symbol will be reported by
+// ObjectFile<E>::scan_relocations().
 template <typename E>
 void claim_unresolved_symbols(Context<E> &ctx) {
   Timer t(ctx, "claim_unresolved_symbols");
+
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    file->claim_unresolved_symbols(ctx);
+    if (!file->is_alive)
+      return;
+
+    for (i64 i = file->first_global; i < file->elf_syms.size(); i++) {
+      const ElfSym<E> &esym = file->elf_syms[i];
+      Symbol<E> &sym = *file->symbols[i];
+      if (!esym.is_undef())
+        continue;
+
+      std::scoped_lock lock(sym.mu);
+
+      if (sym.file)
+        if (!sym.esym().is_undef() || sym.file->priority <= file->priority)
+          continue;
+
+      // If a symbol name is in the form of "foo@version", search for
+      // symbol "foo" and check if the symbol has version "version".
+      if (file->has_symver.get(i - file->first_global)) {
+        std::string_view str = file->symbol_strtab.data() + esym.st_name;
+        i64 pos = str.find('@');
+        assert(pos != str.npos);
+
+        std::string_view name = str.substr(0, pos);
+        std::string_view ver = str.substr(pos + 1);
+
+        Symbol<E> *sym2 = get_symbol(ctx, name);
+        if (sym2->file && sym2->file->is_dso && sym2->get_version() == ver) {
+          file->symbols[i] = sym2;
+          continue;
+        }
+      }
+
+      auto claim = [&](bool is_imported) {
+        if (sym.is_traced)
+          SyncOut(ctx) << "trace-symbol: " << *file << ": unresolved"
+                       << (esym.is_weak() ? " weak" : "")
+                       << " symbol " << sym;
+
+        sym.file = file;
+        sym.origin = 0;
+        sym.value = 0;
+        sym.sym_idx = i;
+        sym.is_weak = false;
+        sym.is_imported = is_imported;
+        sym.is_exported = false;
+        sym.ver_idx = is_imported ? 0 : ctx.default_version;
+      };
+
+      if (esym.is_undef_weak()) {
+        if (ctx.arg.shared && sym.visibility != STV_HIDDEN &&
+            ctx.arg.z_dynamic_undefined_weak) {
+          // Global weak undefined symbols are promoted to dynamic symbols
+          // when linking a DSO unless `-z nodynamic_undefined_weak` was given.
+          claim(true);
+        } else {
+          // Otherwise, weak undefs are converted to absolute symbols with value 0.
+          claim(false);
+        }
+        continue;
+      }
+
+      // Traditionally, remaining undefined symbols cause a link failure
+      // only when we are creating an executable. Undefined symbols in
+      // shared objects are promoted to dynamic symbols, so that they'll
+      // get another chance to be resolved at run-time. You can change the
+      // behavior by passing `-z defs` to the linker.
+      //
+      // Even if `-z defs` is given, weak undefined symbols are still
+      // promoted to dynamic symbols for compatibility with other linkers.
+      // Some major programs, notably Firefox, depend on the behavior
+      // (they use this loophole to export symbols from libxul.so).
+      if (ctx.arg.shared && sym.visibility != STV_HIDDEN && !ctx.arg.z_defs) {
+        claim(true);
+        continue;
+      }
+
+      // Convert remaining undefined symbols to absolute symbols with value 0.
+      claim(false);
+    }
   });
 }
 
@@ -1295,6 +1383,36 @@ void scan_relocations(Context<E> &ctx) {
     Warn(ctx) << "creating a DT_TEXTREL in an output file";
 }
 
+// Report all undefined symbols, grouped by symbol.
+template <typename E>
+void report_undef_errors(Context<E> &ctx) {
+  constexpr i64 max_errors = 3;
+
+  for (auto &pair : ctx.undef_errors) {
+    std::string_view sym_name = pair.first;
+    std::span<std::string> errors = pair.second;
+
+    if (ctx.arg.demangle)
+      sym_name = demangle(sym_name);
+
+    std::stringstream ss;
+    ss << "undefined symbol: " << sym_name << "\n";
+
+    for (i64 i = 0; i < errors.size() && i < max_errors; i++)
+      ss << errors[i];
+
+    if (errors.size() > max_errors)
+      ss << ">>> referenced " << (errors.size() - max_errors) << " more times\n";
+
+    if (ctx.arg.unresolved_symbols == UNRESOLVED_ERROR)
+      Error(ctx) << ss.str();
+    else if (ctx.arg.unresolved_symbols == UNRESOLVED_WARN)
+      Warn(ctx) << ss.str();
+  }
+
+  ctx.checkpoint();
+}
+
 template <typename E>
 void create_reloc_sections(Context<E> &ctx) {
   Timer t(ctx, "create_reloc_sections");
@@ -1335,6 +1453,10 @@ void copy_chunks(Context<E> &ctx) {
       copy(*chunk);
   });
 
+  // Undefined symbols in SHF_ALLOC sections are found by scan_relocations(),
+  // but those in non-SHF_ALLOC sections cannot be found until we copy section
+  // contents. So we need to call this function again to report possible
+  // undefined errors.
   report_undef_errors(ctx);
 
   if constexpr (is_arm32<E>)
@@ -1451,17 +1573,17 @@ void parse_symbol_version(Context<E> &ctx) {
     verdefs[ctx.arg.version_definitions[i]] = i + VER_NDX_LAST_RESERVED + 1;
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    for (i64 i = 0; i < file->elf_syms.size() - file->first_global; i++) {
+    for (i64 i = file->first_global; i < file->elf_syms.size(); i++) {
       // Match VERSION part of symbol foo@VERSION with version definitions.
-      // The symbols' VERSION parts are in file->symvers.
-      if (!file->symvers[i])
+      if (!file->has_symver.get(i - file->first_global))
         continue;
 
-      Symbol<E> *sym = file->symbols[i + file->first_global];
+      Symbol<E> *sym = file->symbols[i];
       if (sym->file != file)
         continue;
 
-      std::string_view ver = file->symvers[i];
+      const char *name = file->symbol_strtab.data() + file->elf_syms[i].st_name;
+      std::string_view ver = strchr(name, '@') + 1;
 
       bool is_default = false;
       if (ver.starts_with('@')) {
@@ -1485,7 +1607,8 @@ void parse_symbol_version(Context<E> &ctx) {
       // versioned symbol. Likewise, if `foo@VERSION` and `foo@@VERSION` are
       // defined, the default one takes precedence.
       Symbol<E> *sym2 = get_symbol(ctx, sym->name());
-      if (sym2->file == file && !file->symvers[sym2->sym_idx - file->first_global])
+      if (sym2->file == file &&
+          !file->has_symver.get(sym2->sym_idx - file->first_global))
         if (sym2->ver_idx == ctx.default_version ||
             (sym2->ver_idx & ~VERSYM_HIDDEN) == (sym->ver_idx & ~VERSYM_HIDDEN))
           sym2->ver_idx = VER_NDX_LOCAL;
@@ -2486,6 +2609,7 @@ template void compute_section_sizes(Context<E> &);
 template void sort_output_sections(Context<E> &);
 template void claim_unresolved_symbols(Context<E> &);
 template void scan_relocations(Context<E> &);
+template void report_undef_errors(Context<E> &);
 template void create_reloc_sections(Context<E> &);
 template void copy_chunks(Context<E> &);
 template void construct_relr(Context<E> &);

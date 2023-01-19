@@ -170,9 +170,10 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
     u8 *loc = base + rel.r_offset;
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
@@ -217,8 +218,9 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
@@ -234,24 +236,24 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       if (rel.r_addend)
         ctx.extra.got->add_symbol(sym, rel.r_addend);
       else
-        sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_GOT;
       break;
     case R_ALPHA_SREL32:
       scan_pcrel(ctx, sym, rel);
       break;
     case R_ALPHA_BRSGP:
       if (sym.is_imported)
-        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_PLT;
       break;
     case R_ALPHA_TLSGD:
-      sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
+      sym.flags |= NEEDS_TLSGD;
       break;
     case R_ALPHA_TLSLDM:
-      ctx.needs_tlsld.store(true, std::memory_order_relaxed);
+      ctx.needs_tlsld = true;
       break;
     case R_ALPHA_GOTTPREL:
     case R_ALPHA_TPRELHI:
-      sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOTTP;
       break;
     case R_ALPHA_GPREL32:
     case R_ALPHA_LITUSE:

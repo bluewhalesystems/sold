@@ -30,7 +30,7 @@
 // 0x10000 (or 65536) bytes.
 //
 // Since each object file has its own .got2, %r30 refers to different
-// places in a merged .got2 for two functions that are came from different
+// places in a merged .got2 for two functions that came from different
 // input files. Therefore, %r30 makes sense only within a single function.
 //
 // Technically, we can reuse a %r30 value in our PLT if we create a PLT
@@ -46,11 +46,11 @@ namespace mold::elf {
 
 using E = PPC32;
 
-static u64 lo(u64 x)       { return x & 0xffff; }
-static u64 hi(u64 x)       { return x >> 16; }
-static u64 ha(u64 x)       { return (x + 0x8000) >> 16; }
-static u64 high(u64 x)     { return (x >> 16) & 0xffff; }
-static u64 higha(u64 x)    { return ((x + 0x8000) >> 16) & 0xffff; }
+static u64 lo(u64 x)    { return x & 0xffff; }
+static u64 hi(u64 x)    { return x >> 16; }
+static u64 ha(u64 x)    { return (x + 0x8000) >> 16; }
+static u64 high(u64 x)  { return (x >> 16) & 0xffff; }
+static u64 higha(u64 x) { return ((x + 0x8000) >> 16) & 0xffff; }
 
 template <>
 void write_plt_header(Context<E> &ctx, u8 *buf) {
@@ -297,9 +297,10 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
     u8 *loc = base + rel.r_offset;
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
@@ -339,14 +340,15 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym];
+    const ElfSym<E> &esym = file.elf_syms[rel.r_sym];
 
-    if (!sym.file) {
+    if (!is_resolved(sym, esym)) {
       record_undef_error(ctx, rel);
       continue;
     }
 
     if (sym.is_ifunc())
-      sym.flags.fetch_or(NEEDS_GOT | NEEDS_PLT, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOT | NEEDS_PLT;
 
     switch (rel.r_type) {
     case R_PPC_ADDR32:
@@ -379,22 +381,22 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_PPC_PLT16_HI:
     case R_PPC_PLT16_HA:
     case R_PPC_PLT32:
-      sym.flags.fetch_or(NEEDS_GOT, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOT;
       break;
     case R_PPC_REL24:
     case R_PPC_PLTREL24:
     case R_PPC_PLTREL32:
       if (sym.is_imported)
-        sym.flags.fetch_or(NEEDS_PLT, std::memory_order_relaxed);
+        sym.flags |= NEEDS_PLT;
       break;
     case R_PPC_GOT_TLSGD16:
-      sym.flags.fetch_or(NEEDS_TLSGD, std::memory_order_relaxed);
+      sym.flags |= NEEDS_TLSGD;
       break;
     case R_PPC_GOT_TLSLD16:
-      ctx.needs_tlsld.store(true, std::memory_order_relaxed);
+      ctx.needs_tlsld = true;
       break;
     case R_PPC_GOT_TPREL16:
-      sym.flags.fetch_or(NEEDS_GOTTP, std::memory_order_relaxed);
+      sym.flags |= NEEDS_GOTTP;
       break;
     case R_PPC_LOCAL24PC:
     case R_PPC_TLS:
