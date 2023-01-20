@@ -84,7 +84,7 @@ public:
   std::string_view filename;
   std::vector<Symbol<E> *> syms;
   i64 priority = 0;
-  std::atomic_bool is_alive = false;
+  Atomic<bool> is_alive = false;
   bool is_dylib = false;
   bool is_hidden = false;
   bool is_weak = false;
@@ -247,8 +247,8 @@ public:
   // Refers another subsection If this subsection is merged with it
   Subsection<E> *replacer = nullptr;
 
-  std::atomic_uint8_t p2align = 0;
-  std::atomic_bool is_alive = true;
+  Atomic<u8> p2align = 0;
+  Atomic<bool> is_alive = true;
   bool added_to_osec : 1 = false;
 };
 
@@ -290,7 +290,7 @@ struct Symbol {
 
   tbb::spin_mutex mu;
 
-  std::atomic_uint8_t flags = 0;
+  Atomic<u8> flags = 0;
 
   u8 scope : 2 = SCOPE_LOCAL;
   bool is_imported : 1 = false;
