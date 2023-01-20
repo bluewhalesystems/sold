@@ -7,7 +7,7 @@ EOF
 
 mkdir -p $t/x/y
 
-cc --ld-path=./ld64 -shared -o $t/x/y/libfoo.dylib $t/a.o -Wl,-install_name,@loader_path/x/y/libfoo.dylib
+cc --ld-path=./ld64 -shared -o $t/x/y/libfoo.dylib $t/a.o -Wl,-install_name,@executable_path/x/y/libfoo.dylib
 
 cat <<EOF | cc -o $t/b.o -c -xc -
 void bar() {}
@@ -17,24 +17,14 @@ cc --ld-path=./ld64 -shared -o $t/libbar.dylib $t/b.o -Wl,-reexport_library,$t/x
 
 objdump --macho --dylibs-used $t/libbar.dylib | grep -q 'libfoo.*reexport'
 
-cat <<EOF | cc -o $t/c.o -c -xc -
-void baz() {}
-EOF
-
-cc --ld-path=./ld64 -shared -o $t/libbaz.dylib $t/c.o -Wl,-reexport_library,$t/libbar.dylib
-
-objdump --macho --dylibs-used $t/libbaz.dylib | grep -q 'libbar.*reexport'
-
 cat <<EOF | cc -o $t/d.o -c -xc -
 void foo();
 void bar();
-void baz();
 
 int main() {
   foo();
   bar();
-  baz();
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/d.o -L$t -lbaz
+cc --ld-path=./ld64 -o $t/exe $t/d.o -L$t -lbar

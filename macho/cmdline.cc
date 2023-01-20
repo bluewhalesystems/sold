@@ -355,6 +355,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.dependency_info = arg;
     } else if (read_flag("-dylib")) {
       ctx.output_type = MH_DYLIB;
+    } else if (read_arg("-executable_path")) {
+      ctx.arg.executable_path = arg;
     } else if (read_hex("-headerpad")) {
       ctx.arg.headerpad = hex_arg;
     } else if (read_flag("-headerpad_max_install_names")) {
@@ -553,12 +555,15 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     ctx.arg.pagezero_size = (ctx.output_type == MH_EXECUTE) ? 0x100000000 : 0;
   }
 
-  if (ctx.arg.final_output == "") {
-    if (ctx.arg.install_name != "")
+  if (ctx.arg.final_output.empty()) {
+    if (!ctx.arg.install_name.empty())
       ctx.arg.final_output = ctx.arg.install_name;
     else
       ctx.arg.final_output = ctx.arg.output;
   }
+
+  if (ctx.arg.executable_path.empty() && ctx.output_type == MH_EXECUTE)
+    ctx.arg.executable_path = ctx.arg.output;
 
   if (ctx.arg.uuid == UUID_RANDOM)
     memcpy(ctx.uuid, get_uuid_v4().data(), 16);

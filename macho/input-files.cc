@@ -978,6 +978,11 @@ find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
     return nullptr;
   };
 
+  if (path.starts_with("@executable_path/") && ctx.output_type == MH_EXECUTE) {
+    path = path_clean(ctx.arg.executable_path + "/../" + path.substr(17));
+    return find(path);
+  }
+
   if (path.starts_with("@loader_path/")) {
     path = path_clean(std::string(parent.mf->name) + "/../" + path.substr(13));
     return find(path);

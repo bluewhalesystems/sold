@@ -37,4 +37,4 @@ int main() {
 }
 EOF
 
-cc -o $t/exe $t/d.o -L$t -lbaz
+cc --ld-path=./ld64 -o $t/exe $t/d.o -L$t -lbaz

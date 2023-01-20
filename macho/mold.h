@@ -919,6 +919,7 @@ struct Context {
     std::string bundle_loader;
     std::string chroot;
     std::string dependency_info;
+    std::string executable_path;
     std::string final_output;
     std::string install_name;
     std::string lto_library;
