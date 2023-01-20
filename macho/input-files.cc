@@ -454,17 +454,15 @@ template <typename E>
 Subsection<E> *
 ObjectFile<E>::find_subsection(Context<E> &ctx, u32 secidx, u32 addr) {
   assert(subsections.size() > 0);
-  auto begin = subsections.begin();
-  auto end = subsections.end();
-  auto upper = std::upper_bound(begin, end, addr,
-      [](u32 addr, Subsection<E> *subsec) { return addr < subsec->input_addr; });
 
-  if (upper == begin)
+  auto it = std::partition_point(subsections.begin(), subsections.end(),
+                                 [&](Subsection<E> *subsec) {
+    return subsec->input_addr <= addr;
+  });
+
+  if (it == subsections.begin())
     return nullptr;
-  Subsection<E> *subsec = *(upper - 1);
-  if (subsec->isec.secidx == secidx)
-    return subsec;
-  return nullptr;
+  return *(it - 1);
 }
 
 template <typename E>
