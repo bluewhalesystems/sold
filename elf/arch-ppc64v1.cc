@@ -387,6 +387,10 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_PPC64_GOT_TLSLD16_HA:
       ctx.needs_tlsld = true;
       break;
+    case R_PPC64_TPREL16_HA:
+    case R_PPC64_TPREL16_LO:
+      check_tlsle(ctx, sym, rel);
+      break;
     case R_PPC64_REL64:
     case R_PPC64_TOC16_HA:
     case R_PPC64_TOC16_LO:
@@ -399,8 +403,6 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_PPC64_PLT16_LO_DS:
     case R_PPC64_PLTSEQ:
     case R_PPC64_PLTCALL:
-    case R_PPC64_TPREL16_HA:
-    case R_PPC64_TPREL16_LO:
     case R_PPC64_GOT_TPREL16_LO_DS:
     case R_PPC64_GOT_TLSGD16_LO:
     case R_PPC64_GOT_TLSLD16_LO:
@@ -664,13 +666,30 @@ void PPC64OpdSection::add_symbol(Context<E> &ctx, Symbol<E> *sym) {
   this->shdr.sh_size += ENTRY_SIZE;
 }
 
+i64 PPC64OpdSection::get_reldyn_size(Context<E> &ctx) const {
+  if (ctx.arg.pic)
+    return symbols.size() * 2;
+  return 0;
+}
+
 void PPC64OpdSection::copy_buf(Context<E> &ctx) {
   ub64 *buf = (ub64 *)(ctx.buf + this->shdr.sh_offset);
 
+  ElfRel<E> *rel = nullptr;
+  if (ctx.arg.pic)
+    rel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset + reldyn_offset);
+
   for (Symbol<E> *sym : symbols) {
-    *buf++ = sym->get_addr(ctx, NO_PLT | NO_OPD);
+    u64 addr = sym->get_addr(ctx, NO_PLT | NO_OPD);
+    *buf++ = addr;
     *buf++ = ctx.extra.TOC->value;
     *buf++ = 0;
+
+    if (ctx.arg.pic) {
+      u64 loc = sym->get_opd_addr(ctx);
+      *rel++ = ElfRel<E>(loc, E::R_RELATIVE, 0, addr);
+      *rel++ = ElfRel<E>(loc + 8, E::R_RELATIVE, 0, ctx.extra.TOC->value);
+    }
   }
 }
 

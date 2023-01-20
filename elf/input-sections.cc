@@ -57,7 +57,10 @@ InputSection<E>::InputSection(Context<E> &ctx, ObjectFile<E> &file,
   // early for REL-type ELF types to read relocation addends from
   // section contents. For RELA-type, we don't need to do this because
   // addends are in relocations.
-  if constexpr (!E::is_rela)
+  //
+  // SH-4 stores addends to sections despite being RELA, which is a
+  // special (and buggy) case.
+  if constexpr (!E::is_rela || is_sh4<E>)
     uncompress(ctx);
 }
 
@@ -304,6 +307,15 @@ template <typename E>
 void InputSection<E>::scan_toc_rel(Context<E> &ctx, Symbol<E> &sym,
                                    const ElfRel<E> &rel) {
   scan_rel(ctx, *this, sym, rel, get_ppc64_toc_action(ctx, sym));
+}
+
+template <typename E>
+void InputSection<E>::check_tlsle(Context<E> &ctx, Symbol<E> &sym,
+                                  const ElfRel<E> &rel) {
+  if (ctx.arg.shared)
+    Error(ctx) << *this << ": relocation " << rel << " against `" << sym
+               << "` can not be used when making a shared object;"
+               << " recompile with -fPIC";
 }
 
 template <typename E>

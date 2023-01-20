@@ -748,8 +748,6 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       if (rel.r_addend != -4)
         Fatal(ctx) << *this << ": bad r_addend for R_X86_64_GOTTPOFF";
 
-      ctx.has_gottp_rel = true;
-
       bool do_relax = ctx.arg.relax && !ctx.arg.shared &&
                       !sym.is_imported && relax_gottpoff(loc - 3);
       if (!do_relax)
@@ -768,11 +766,13 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
         sym.flags |= NEEDS_TLSDESC;
       break;
     }
+    case R_X86_64_TPOFF32:
+    case R_X86_64_TPOFF64:
+      check_tlsle(ctx, sym, rel);
+      break;
     case R_X86_64_GOTOFF64:
     case R_X86_64_DTPOFF32:
     case R_X86_64_DTPOFF64:
-    case R_X86_64_TPOFF32:
-    case R_X86_64_TPOFF64:
     case R_X86_64_SIZE32:
     case R_X86_64_SIZE64:
     case R_X86_64_TLSDESC_CALL:

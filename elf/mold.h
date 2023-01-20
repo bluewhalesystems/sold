@@ -294,7 +294,7 @@ public:
   bool uncompressed : 1 = false;
 
   // For garbage collection
-  std::atomic_bool is_visited = false;
+  Atomic<bool> is_visited = false;
 
   // For ICF
   //
@@ -313,6 +313,8 @@ private:
   void scan_absrel(Context<E> &ctx, Symbol<E> &sym, const ElfRel<E> &rel);
   void scan_dyn_absrel(Context<E> &ctx, Symbol<E> &sym, const ElfRel<E> &rel);
   void scan_toc_rel(Context<E> &ctx, Symbol<E> &sym, const ElfRel<E> &rel);
+
+  void check_tlsle(Context<E> &ctx, Symbol<E> &sym, const ElfRel<E> &rel);
 
   void apply_dyn_absrel(Context<E> &ctx, Symbol<E> &sym, const ElfRel<E> &rel,
                         u8 *loc, u64 S, i64 A, u64 P, ElfRel<E> *&dynrel);
@@ -372,6 +374,7 @@ public:
   virtual ~Chunk() = default;
   virtual ChunkKind kind() { return SYNTHETIC; }
   virtual OutputSection<E> *to_osec() { return nullptr; }
+  virtual i64 get_reldyn_size(Context<E> &ctx) const { return 0; }
   virtual void copy_buf(Context<E> &ctx) {}
   virtual void write_to(Context<E> &ctx, u8 *buf) { unreachable(); }
   virtual void update_shdr(Context<E> &ctx) {}
@@ -394,6 +397,9 @@ public:
   i64 num_local_symtab = 0;
   i64 strtab_size = 0;
   i64 strtab_offset = 0;
+
+  // Offset in .rel.dyn
+  i64 reldyn_offset = 0;
 
   // For --section-order
   i64 sect_order = 0;
@@ -508,7 +514,7 @@ public:
 
   u64 get_tlsld_addr(Context<E> &ctx) const;
   bool has_tlsld(Context<E> &ctx) const { return tlsld_idx != -1; }
-  i64 get_reldyn_size(Context<E> &ctx) const;
+  i64 get_reldyn_size(Context<E> &ctx) const override;
   void copy_buf(Context<E> &ctx) override;
 
   void compute_symtab_size(Context<E> &ctx) override;
@@ -614,7 +620,6 @@ public:
   }
 
   void update_shdr(Context<E> &ctx) override;
-  void copy_buf(Context<E> &ctx) override;
   void sort(Context<E> &ctx);
 };
 
@@ -861,6 +866,7 @@ public:
 
   void add_symbol(Context<E> &ctx, Symbol<E> *sym);
   void update_shdr(Context<E> &ctx) override;
+  i64 get_reldyn_size(Context<E> &ctx) const override { return symbols.size(); }
   void copy_buf(Context<E> &ctx) override;
 
   bool is_relro;
@@ -1180,7 +1186,7 @@ public:
   std::string filename;
   bool is_dso = false;
   u32 priority;
-  std::atomic_bool is_alive = false;
+  Atomic<bool> is_alive = false;
   std::string_view shstrtab;
   std::string_view symbol_strtab;
 
@@ -1474,6 +1480,7 @@ public:
   }
 
   void add_symbol(Context<PPC64V1> &ctx, Symbol<PPC64V1> *sym);
+  i64 get_reldyn_size(Context<PPC64V1> &ctx) const override;
   void copy_buf(Context<PPC64V1> &ctx) override;
 
   static constexpr i64 ENTRY_SIZE = sizeof(Word<PPC64V1>) * 3;
@@ -1514,7 +1521,7 @@ public:
   void add_symbol(Symbol<ALPHA> &sym, i64 addend);
   void finalize();
   u64 get_addr(Symbol<ALPHA> &sym, i64 addend);
-  i64 get_reldyn_size(Context<ALPHA> &ctx);
+  i64 get_reldyn_size(Context<ALPHA> &ctx) const override;
   void copy_buf(Context<ALPHA> &ctx) override;
 
   struct Entry {
@@ -1522,8 +1529,6 @@ public:
     Symbol<ALPHA> *sym;
     i64 addend;
   };
-
-  i64 reldyn_offset = 0;
 
 private:
   std::vector<Entry> entries;
@@ -1793,7 +1798,6 @@ struct Context {
 
   std::vector<Chunk<E> *> chunks;
   std::atomic_bool needs_tlsld = false;
-  std::atomic_bool has_gottp_rel = false;
   std::atomic_bool has_textrel = false;
   std::atomic_uint32_t num_ifunc_dynrels = 0;
 
@@ -2425,6 +2429,24 @@ inline i64 ObjectFile<E>::get_shndx(const ElfSym<E> &esym) {
 template <typename E>
 inline InputSection<E> *ObjectFile<E>::get_section(const ElfSym<E> &esym) {
   return sections[get_shndx(esym)].get();
+}
+
+template <typename E>
+OutputSection<E> *find_section(Context<E> &ctx, u32 sh_type) {
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (OutputSection<E> *osec = chunk->to_osec())
+      if (osec->shdr.sh_type == sh_type)
+        return osec;
+  return nullptr;
+}
+
+template <typename E>
+OutputSection<E> *find_section(Context<E> &ctx, std::string_view name) {
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (OutputSection<E> *osec = chunk->to_osec())
+      if (osec->name == name)
+        return osec;
+  return nullptr;
 }
 
 template <typename E>

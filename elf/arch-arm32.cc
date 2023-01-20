@@ -604,6 +604,9 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       if (!relax_tlsdesc(ctx, sym))
         sym.flags |= NEEDS_TLSDESC;
       break;
+    case R_ARM_TLS_LE32:
+      check_tlsle(ctx, sym, rel);
+      break;
     case R_ARM_REL32:
     case R_ARM_BASE_PREL:
     case R_ARM_GOTOFF32:
@@ -614,7 +617,6 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_ARM_THM_MOVW_PREL_NC:
     case R_ARM_THM_MOVW_ABS_NC:
     case R_ARM_TLS_LDO32:
-    case R_ARM_TLS_LE32:
     case R_ARM_TLS_CALL:
     case R_ARM_THM_TLS_CALL:
     case R_ARM_V4BX:
@@ -675,7 +677,13 @@ void RangeExtensionThunk<E>::copy_buf(Context<E> &ctx) {
 // likely that it's due to some historical reason.
 //
 // This function sorts .ARM.exidx records.
-static void sort_exidx(Context<E> &ctx, OutputSection<E> &osec) {
+void fixup_arm_exidx_section(Context<E> &ctx) {
+  Timer t(ctx, "fixup_arm_exidx_section");
+
+  OutputSection<E> *osec = find_section(ctx, SHT_ARM_EXIDX);
+  if (!osec)
+    return;
+
   // .ARM.exidx records consists of a signed 31-bit relative address
   // and a 32-bit value. The relative address indicates the start
   // address of a function that the record covers. The value is one of
@@ -695,11 +703,11 @@ static void sort_exidx(Context<E> &ctx, OutputSection<E> &osec) {
     ul32 val;
   };
 
-  if (osec.shdr.sh_size % sizeof(Entry))
+  if (osec->shdr.sh_size % sizeof(Entry))
     Fatal(ctx) << "invalid .ARM.exidx section size";
 
-  Entry *ent = (Entry *)(ctx.buf + osec.shdr.sh_offset);
-  i64 num_entries = osec.shdr.sh_size / sizeof(Entry);
+  Entry *ent = (Entry *)(ctx.buf + osec->shdr.sh_offset);
+  i64 num_entries = osec->shdr.sh_size / sizeof(Entry);
 
   // Entry's addresses are relative to themselves. In order to sort
   // records by addresses, we first translate them so that the addresses
@@ -726,38 +734,12 @@ static void sort_exidx(Context<E> &ctx, OutputSection<E> &osec) {
     if (is_relative(ent[i].val))
       ent[i].val = 0x7fff'ffff & (ent[i].val - offset);
   });
-}
-
-void fixup_arm_exidx_section(Context<E> &ctx) {
-  Timer t(ctx, "fixup_arm_exidx_section");
-
-  auto find_exidx = [&]() -> OutputSection<E> * {
-    for (Chunk<E> *chunk : ctx.chunks)
-      if (OutputSection<E> *osec = chunk->to_osec())
-        if (osec->shdr.sh_type == SHT_ARM_EXIDX)
-          return osec;
-    return nullptr;
-  };
-
-  OutputSection<E> *exidx = find_exidx();
-  if (!exidx)
-    return;
-
-  // Sort .ARM.exidx contents
-  sort_exidx(ctx, *exidx);
 
   // .ARM.exidx's sh_link should be set to the .text section index.
   // Runtime doesn't care about it, but the binutils's strip command does.
   if (ctx.shdr) {
-    auto find_text = [&]() -> Chunk<E> * {
-      for (Chunk<E> *chunk : ctx.chunks)
-        if (chunk->name == ".text")
-          return chunk;
-      return nullptr;
-    };
-
-    if (Chunk<E> *text = find_text()) {
-      exidx->shdr.sh_link = text->shndx;
+    if (Chunk<E> *text = find_section(ctx, ".text")) {
+      osec->shdr.sh_link = text->shndx;
       ctx.shdr->copy_buf(ctx);
     }
   }

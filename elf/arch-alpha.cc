@@ -252,8 +252,11 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
       ctx.needs_tlsld = true;
       break;
     case R_ALPHA_GOTTPREL:
-    case R_ALPHA_TPRELHI:
       sym.flags |= NEEDS_GOTTP;
+      break;
+    case R_ALPHA_TPRELHI:
+    case R_ALPHA_TPRELLO:
+      check_tlsle(ctx, sym, rel);
       break;
     case R_ALPHA_GPREL32:
     case R_ALPHA_LITUSE:
@@ -263,7 +266,6 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_ALPHA_GPRELLOW:
     case R_ALPHA_DTPRELHI:
     case R_ALPHA_DTPRELLO:
-    case R_ALPHA_TPRELLO:
       break;
     default:
       Fatal(ctx) << *this << ": unknown relocation: " << rel;
@@ -303,9 +305,9 @@ u64 AlphaGotSection::get_addr(Symbol<E> &sym, i64 addend) {
   return this->shdr.sh_addr + (it - entries.begin()) * sizeof(Word<E>);
 }
 
-i64 AlphaGotSection::get_reldyn_size(Context<E> &ctx) {
+i64 AlphaGotSection::get_reldyn_size(Context<E> &ctx) const {
   i64 n = 0;
-  for (Entry &e : entries)
+  for (const Entry &e : entries)
     if (e.sym->is_imported || (ctx.arg.pic && !e.sym->is_absolute()))
       n++;
   return n;
@@ -318,9 +320,8 @@ void AlphaGotSection::finalize() {
 }
 
 void AlphaGotSection::copy_buf(Context<E> &ctx) {
-  ElfRel<E> *dynrel = nullptr;
-  if (ctx.reldyn)
-    dynrel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset + reldyn_offset);
+  ElfRel<E> *dynrel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset +
+                                    reldyn_offset);
 
   for (i64 i = 0; i < entries.size(); i++) {
     Entry &e = entries[i];

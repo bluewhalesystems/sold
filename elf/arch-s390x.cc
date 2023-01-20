@@ -157,7 +157,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       break;
     case R_390_12:
       check(S + A, 0, 1 << 12);
-      *(ul16 *)loc = bits(S + A, 11, S + A);
+      *(ul16 *)loc |= bits(S + A, 11, 0);
       break;
     case R_390_16:
       check(S + A, 0, 1 << 16);
@@ -178,7 +178,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_390_PC12DBL:
     case R_390_PLT12DBL:
       check_dbl(S + A - P, -(1 << 12), 1 << 12);
-      *(ul16 *)loc = ((S + A - P) >> 1) & 0x0fff;
+      *(ul16 *)loc |= bits(S + A - P, 12, 1);
       break;
     case R_390_PC16:
       check(S + A - P, -(1 << 15), 1 << 15);
@@ -209,7 +209,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_390_GOT12:
     case R_390_GOTPLT12:
       check(G + A, 0, 1 << 12);
-      *(ul16 *)loc = bits(G + A, 11, 0);
+      *(ul16 *)loc |= bits(G + A, 11, 0);
       break;
     case R_390_GOT16:
     case R_390_GOTPLT16:
@@ -486,6 +486,8 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     }
     case R_390_TLS_LE32:
     case R_390_TLS_LE64:
+      check_tlsle(ctx, sym, rel);
+      break;
     case R_390_TLS_LDO32:
     case R_390_TLS_LDO64:
     case R_390_TLS_GDCALL:
