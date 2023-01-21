@@ -1058,6 +1058,7 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
 
   // Add -add_ast_path symbols first
   first.locals_offset = ctx.arg.add_ast_path.size();
+  first.strtab_offset = 1;
   for (std::string_view s : ctx.arg.add_ast_path)
     first.strtab_offset += s.size() + 1;
 
