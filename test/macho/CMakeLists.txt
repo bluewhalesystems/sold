@@ -10,12 +10,15 @@ foreach(TEST IN LISTS TESTS)
     COMMAND bash -x ${CMAKE_CURRENT_LIST_DIR}/${TEST}
     WORKING_DIRECTORY ${mold_BINARY_DIR})
 
+  set_tests_properties("${CMAKE_HOST_SYSTEM_PROCESSOR}-{TESTNAME}" PROPERTIES
+    ENVIRONMENT "ARCH=${CMAKE_HOST_SYSTEM_PROCESSOR}")
+
   if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64")
     add_test(NAME "x86_64-${TESTNAME}"
       COMMAND bash -x ${CMAKE_CURRENT_LIST_DIR}/${TEST}
       WORKING_DIRECTORY ${mold_BINARY_DIR})
-  endif()
 
-  set_tests_properties("arm64-${TESTNAME}"  PROPERTIES ENVIRONMENT "ARCH=arm64")
-  set_tests_properties("x86_64-${TESTNAME}" PROPERTIES ENVIRONMENT "ARCH=x86_64")
+    set_tests_properties("x86_64-${TESTNAME}" PROPERTIES
+      ENVIRONMENT "ARCH=x86_64")
+  endif()
 endforeach()
