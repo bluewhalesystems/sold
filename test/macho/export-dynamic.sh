@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | cc -o $t/a.o -c -xc - -flto
+cat <<EOF | $CC -o $t/a.o -c -xc - -flto
 #include <stdio.h>
 
 void hello() {
@@ -13,12 +13,12 @@ int main() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe1 $t/a.o -flto
+$CC --ld-path=./ld64 -o $t/exe1 $t/a.o -flto
 $t/exe1 | grep -q 'Hello world'
 nm -dyldinfo-only $t/exe1 > $t/log1
 ! grep -q _hello $t/log1 || false
 
-cc --ld-path=./ld64 -o $t/exe2 $t/a.o -flto -Wl,-export_dynamic
+$CC --ld-path=./ld64 -o $t/exe2 $t/a.o -flto -Wl,-export_dynamic
 $t/exe2 | grep -q 'Hello world'
 nm -dyldinfo-only $t/exe2 > $t/log2
 grep -q _hello $t/log2

@@ -19,13 +19,13 @@ exports:
 ...
 EOF
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 void foo();
 int main() { foo(); }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/libfoo.tbd $t/a.o \
+$CC --ld-path=./ld64 -o $t/exe $t/libfoo.tbd $t/a.o \
   -Wl,-platform_version,macos,20.0,20.0 >& /dev/null
 
-! cc --ld-path=./ld64 -o $t/exe $t/libfoo.tbd $t/a.o \
+! $CC --ld-path=./ld64 -o $t/exe $t/libfoo.tbd $t/a.o \
   -Wl,-platform_version,macos,25.0,21.0 >& /dev/null || false

@@ -4,7 +4,7 @@
 # For some reason, this test fails only on GitHub CI.
 [ "$GITHUB_ACTIONS" = true ] && { echo skipped; exit; }
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 #include <stdio.h>
 
 _Thread_local int a;
@@ -18,5 +18,5 @@ int main() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/a.o
+$CC --ld-path=./ld64 -o $t/exe $t/a.o
 $t/exe | grep -q '^0 5 5$'

@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 void foo() {}
 __attribute__((visibility("hidden"))) void bar() {}
 void baz() {}
@@ -14,7 +14,7 @@ _foo
 _a*
 EOF
 
-cc --ld-path=./ld64 -shared -o $t/c.dylib $t/a.o
+$CC --ld-path=./ld64 -shared -o $t/c.dylib $t/a.o
 
 objdump --macho --exports-trie $t/c.dylib > $t/log1
 grep -q _foo $t/log1
@@ -23,7 +23,7 @@ grep -q _baz $t/log1
 grep -q _abc $t/log1
 grep -q _xyz $t/log1
 
-cc --ld-path=./ld64 -shared -o $t/d.dylib $t/a.o \
+$CC --ld-path=./ld64 -shared -o $t/d.dylib $t/a.o \
   -Wl,-exported_symbols_list,$t/list
 
 objdump --macho --exports-trie $t/d.dylib > $t/log2
@@ -33,7 +33,7 @@ grep -q _foo $t/log2
 grep -q _abc $t/log2
 ! grep -q _xyz $t/log2 || false
 
-cc --ld-path=./ld64 -shared -o $t/e.dylib $t/a.o -Wl,-exported_symbol,_foo
+$CC --ld-path=./ld64 -shared -o $t/e.dylib $t/a.o -Wl,-exported_symbol,_foo
 
 objdump --macho --exports-trie $t/e.dylib > $t/log3
 grep -q _foo $t/log3

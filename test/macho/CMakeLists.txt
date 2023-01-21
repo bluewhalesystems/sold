@@ -6,7 +6,16 @@ file(GLOB TESTS
 foreach(TEST IN LISTS TESTS)
   string(REGEX REPLACE "\\.sh$" "" TESTNAME ${TEST})
 
-  add_test(NAME ${TESTNAME}
+  add_test(NAME "${CMAKE_HOST_SYSTEM_PROCESSOR}-${TESTNAME}"
     COMMAND bash -x ${CMAKE_CURRENT_LIST_DIR}/${TEST}
     WORKING_DIRECTORY ${mold_BINARY_DIR})
+
+  if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64")
+    add_test(NAME "x86_64-${TESTNAME}"
+      COMMAND bash -x ${CMAKE_CURRENT_LIST_DIR}/${TEST}
+      WORKING_DIRECTORY ${mold_BINARY_DIR})
+  endif()
+
+  set_tests_properties("arm64-${TESTNAME}"  PROPERTIES ENVIRONMENT "ARCH=arm64")
+  set_tests_properties("x86_64-${TESTNAME}" PROPERTIES ENVIRONMENT "ARCH=x86_64")
 endforeach()

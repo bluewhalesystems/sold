@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 #include <stdio.h>
 
 int hello() {
@@ -10,8 +10,8 @@ int hello() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/a.o -Wl,-e,_hello
+$CC --ld-path=./ld64 -o $t/exe $t/a.o -Wl,-e,_hello
 $t/exe | grep -q 'Hello world'
 
-! cc --ld-path=./ld64 -o $t/exe $t/a.o -Wl,-e,no_such_symbol 2> $t/log || false
+! $CC --ld-path=./ld64 -o $t/exe $t/a.o -Wl,-e,no_such_symbol 2> $t/log || false
 grep -q 'undefined entry point symbol: no_such_symbol' $t/log

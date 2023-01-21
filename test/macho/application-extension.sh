@@ -20,13 +20,13 @@ exports:
 ...
 EOF
 
-cat <<EOF | cc -o $t/b.o -c -xc -
+cat <<EOF | $CC -o $t/b.o -c -xc -
 int foo();
 int main() { foo(); }
 EOF
 
-cc -o $t/exe1 $t/b.o $t/a.tbd >& $t/log1
+$CC -o $t/exe1 $t/b.o $t/a.tbd >& $t/log1
 ! grep -q 'application extension' $t/log1 || false
 
-cc -o $t/exe1 $t/b.o $t/a.tbd -Wl,-application_extension >& $t/log2
+$CC -o $t/exe1 $t/b.o $t/a.tbd -Wl,-application_extension >& $t/log2
 grep -q 'application extension' $t/log2

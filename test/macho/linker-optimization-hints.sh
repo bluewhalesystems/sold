@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | cc -o $t/a.o -c -xc - -O2
+cat <<EOF | $CC -o $t/a.o -c -xc - -O2
 #include <stdio.h>
 
 char x1 = -1;
@@ -16,7 +16,7 @@ void hello() {
 }
 EOF
 
-cat <<EOF | cc -o $t/b.o -c -xc - -O2
+cat <<EOF | $CC -o $t/b.o -c -xc - -O2
 #include <stdio.h>
 
 void hello();
@@ -34,5 +34,5 @@ int main() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/a.o $t/b.o
+$CC --ld-path=./ld64 -o $t/exe $t/a.o $t/b.o
 $t/exe | grep -q 'Hello world -1 -1 -1 -1 2 3'

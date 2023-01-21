@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | cc -c -o $t/a.o -xc -
+cat <<EOF | $CC -c -o $t/a.o -xc -
 #include <stdio.h>
 
 int main() {
@@ -9,11 +9,11 @@ int main() {
 }
 EOF
 
-cc --ld-path=./ld64 -B. -o $t/exe1 $t/a.o -Wl,-adhoc_codesign
+$CC --ld-path=./ld64 -B. -o $t/exe1 $t/a.o -Wl,-adhoc_codesign
 otool -l $t/exe1 | grep -q LC_CODE_SIGNATURE
 $t/exe1 | grep -Fq 'Hello world'
 
-cc --ld-path=./ld64 -B. -o $t/exe2 $t/a.o -Wl,-no_adhoc_codesign
+$CC --ld-path=./ld64 -B. -o $t/exe2 $t/a.o -Wl,-no_adhoc_codesign
 otool -l $t/exe2 > $t/log2
 ! grep -q LC_CODE_SIGNATURE $t/log2 || false
 grep -q LC_UUID $t/log2

@@ -19,17 +19,17 @@ exports:
 ...
 EOF
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 void foo();
 void bar() { foo(); }
 EOF
 
-cc --ld-path=./ld64 -shared -o $t/b.dylib $t/libfoo.tbd $t/a.o \
+$CC --ld-path=./ld64 -shared -o $t/b.dylib $t/libfoo.tbd $t/a.o \
   -Wl,-platform_version,macos,9.0,9.0 2> /dev/null
 
 otool -L $t/b.dylib | grep -q /foo
 
-cc --ld-path=./ld64 -shared -o $t/b.dylib $t/libfoo.tbd $t/a.o \
+$CC --ld-path=./ld64 -shared -o $t/b.dylib $t/libfoo.tbd $t/a.o \
   -Wl,-platform_version,macos,14.0,14.0 2> /dev/null
 
 otool -L $t/b.dylib | grep -q /bar

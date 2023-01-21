@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | cc -c -o $t/a.o -xc -
+cat <<EOF | $CC -c -o $t/a.o -xc -
 #include <stdio.h>
 char world[] = "world";
 
@@ -10,9 +10,9 @@ char *hello() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/b.dylib -shared $t/a.o
+$CC --ld-path=./ld64 -o $t/b.dylib -shared $t/a.o
 
-cat <<EOF | cc -o $t/c.o -c -xc -
+cat <<EOF | $CC -o $t/c.o -c -xc -
 #include <stdio.h>
 
 char *hello();
@@ -23,5 +23,5 @@ int main() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/c.o $t/b.dylib
+$CC --ld-path=./ld64 -o $t/exe $t/c.o $t/b.dylib
 $t/exe | grep -q 'Hello world'

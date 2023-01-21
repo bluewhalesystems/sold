@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | c++ -c -o $t/a.o -xobjective-c++ -
+cat <<EOF | $CXX -c -o $t/a.o -xobjective-c++ -
 #import <Foundation/Foundation.h>
 
 #include <libunwind.h>
@@ -46,6 +46,6 @@ int main(int argc, char **argv) {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/a.o -framework Foundation
+$CC --ld-path=./ld64 -o $t/exe $t/a.o -framework Foundation
 $t/exe 2>&1 | grep -q 'proc_name=objc_exception_throw has_handler=0'
 $t/exe 2>&1 | grep -q 'proc_name=main has_handler=1'

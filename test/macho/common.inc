@@ -3,6 +3,10 @@
 # Make sure all commands print out messages in English
 export LC_ALL=C
 
+ARCH="${ARCH:-$(uname -m)}"
+CC="cc -arch $ARCH"
+CXX="c++ -arch $ARCH"
+
 # Common functions
 test_cflags() {
   echo 'int main() {}' | $CC "$@" -o /dev/null -xc - >& /dev/null
@@ -32,5 +36,5 @@ trap on_exit EXIT
 # Print out the startup message
 testname=$(basename "$0" .sh)
 echo -n "Testing $testname ... "
-t=out/test/macho/$(uname -p)/$testname
+t=out/test/macho/$ARCH/$testname
 mkdir -p $t

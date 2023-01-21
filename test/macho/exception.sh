@@ -1,7 +1,7 @@
 #!/bin/bash
 . $(dirname $0)/common.inc
 
-cat <<EOF | c++ -c -o $t/a.o -xc++ -
+cat <<EOF | $CXX -c -o $t/a.o -xc++ -
 int main() {
   try {
     throw 0;
@@ -12,5 +12,5 @@ int main() {
 }
 EOF
 
-c++ --ld-path=./ld64 -o $t/exe $t/a.o
+$CXX --ld-path=./ld64 -o $t/exe $t/a.o
 $t/exe

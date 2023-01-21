@@ -3,14 +3,14 @@
 
 mkdir -p $t/foo/bar
 
-cat <<EOF | cc -shared -o $t/foo/bar/libbaz.dylib -xc -
+cat <<EOF | $CC -shared -o $t/foo/bar/libbaz.dylib -xc -
 void foo() {}
 EOF
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 void foo();
 void bar() { foo(); }
 EOF
 
-cc --ld-path=./ld64 -shared -o $t/b.dylib $t/a.o -nodefaultlibs \
+$CC --ld-path=./ld64 -shared -o $t/b.dylib $t/a.o -nodefaultlibs \
   -L/foo/bar -isysroot $t -lbaz

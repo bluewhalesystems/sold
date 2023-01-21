@@ -38,7 +38,7 @@ exports:
 ...
 EOF
 
-cat <<EOF | cc -o $t/a.o -c -xc -
+cat <<EOF | $CC -o $t/a.o -c -xc -
 extern void foo();
 extern void bar() __attribute__((weak_import));
 
@@ -49,6 +49,6 @@ int main() {
 }
 EOF
 
-cc --ld-path=./ld64 -o $t/exe $t/a.o -F$t/libs -Wl,-framework,SomeFramework
+$CC --ld-path=./ld64 -o $t/exe $t/a.o -F$t/libs -Wl,-framework,SomeFramework
 
 otool -L $t/exe | grep -q '/usr/frameworks/SomeFramework.framework/SomeFramework'
