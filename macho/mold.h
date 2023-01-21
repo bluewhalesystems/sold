@@ -607,6 +607,20 @@ public:
 };
 
 template <typename E>
+class IndirectSymtabSection : public Chunk<E> {
+public:
+  IndirectSymtabSection(Context<E> &ctx)
+    : Chunk<E>(ctx, "__LINKEDIT", "__ind_sym_tab") {
+    this->is_hidden = true;
+  }
+
+  static constexpr i64 ENTRY_SIZE = 4;
+
+  void compute_size(Context<E> &ctx) override;
+  void copy_buf(Context<E> &ctx) override;
+};
+
+template <typename E>
 class ObjcImageInfoSection : public Chunk<E> {
 public:
   static std::unique_ptr<ObjcImageInfoSection> create(Context<E> &ctx);
@@ -1007,6 +1021,7 @@ struct Context {
   ExportSection<E> export_{*this};
   SymtabSection<E> symtab{*this};
   StrtabSection<E> strtab{*this};
+  IndirectSymtabSection<E> indir_symtab{*this};
 
   std::unique_ptr<FunctionStartsSection<E>> function_starts;
   std::unique_ptr<ObjcImageInfoSection<E>> image_info;

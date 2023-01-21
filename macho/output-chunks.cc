@@ -81,6 +81,8 @@ static std::vector<u8> create_dysymtab_cmd(Context<E> &ctx) {
   cmd.nextdefsym = ctx.symtab.undefs_offset - ctx.symtab.globals_offset;
   cmd.iundefsym = ctx.symtab.undefs_offset;
   cmd.nundefsym = ctx.symtab.hdr.size / sizeof(MachSym) - ctx.symtab.undefs_offset;
+  cmd.indirectsymoff = ctx.indir_symtab.hdr.offset;
+  cmd.nindirectsyms  = ctx.indir_symtab.hdr.size / ctx.indir_symtab.ENTRY_SIZE;
   return buf;
 }
 
@@ -1174,6 +1176,40 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template <typename E>
+void IndirectSymtabSection<E>::compute_size(Context<E> &ctx) {
+  ctx.got.hdr.reserved1 = 0;
+  i64 n = ctx.got.syms.size();
+
+  ctx.thread_ptrs.hdr.reserved1 = n;
+  n += ctx.thread_ptrs.syms.size();
+
+  ctx.stubs.hdr.reserved1 = n;
+  n += ctx.stubs.syms.size();
+
+  ctx.lazy_symbol_ptr.hdr.reserved1 = n;
+  n += ctx.stubs.syms.size();
+
+  this->hdr.size = n * ENTRY_SIZE;
+}
+
+template <typename E>
+void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
+  ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
+
+  for (Symbol<E> *sym : ctx.got.syms)
+    *buf++ = sym->output_symtab_idx;
+
+  for (Symbol<E> *sym : ctx.thread_ptrs.syms)
+    *buf++ = sym->output_symtab_idx;
+
+  for (Symbol<E> *sym : ctx.stubs.syms)
+    *buf++ = sym->output_symtab_idx;
+
+  for (Symbol<E> *sym : ctx.stubs.syms)
+    *buf++ = sym->output_symtab_idx;
+}
+
+template <typename E>
 static bool has_objc_image_info_section(Context<E> &ctx) {
   return false;
 }
@@ -1637,6 +1673,7 @@ template class ExportSection<E>;
 template class FunctionStartsSection<E>;
 template class SymtabSection<E>;
 template class StrtabSection<E>;
+template class IndirectSymtabSection<E>;
 template class ObjcStubsSection<E>;
 template class CodeSignatureSection<E>;
 template class ObjcImageInfoSection<E>;
