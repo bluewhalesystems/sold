@@ -90,6 +90,16 @@ public:
   bool is_weak = false;
   std::string archive_name;
 
+  // For SymtabSection
+  i32 num_locals = 0;
+  i32 num_globals = 0;
+  i32 num_undefs = 0;
+  i32 locals_offset = 0;
+  i32 globals_offset = 0;
+  i32 undefs_offset = 0;
+  i32 strtab_size = 0;
+  i32 strtab_offset = 0;
+
 protected:
   InputFile(MappedFile<Context<E>> *mf) : mf(mf), filename(mf->name) {}
   InputFile() : filename("<internal>") {}
@@ -302,6 +312,9 @@ struct Symbol {
   // For range extension thunks
   i32 thunk_idx = -1;
   i32 thunk_sym_idx = -1;
+
+  // For symtab
+  i32 output_symtab_idx = -1;
 
   inline u64 get_addr(Context<E> &ctx) const;
   inline u64 get_got_addr(Context<E> &ctx) const;
@@ -578,12 +591,8 @@ public:
   void compute_size(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
 
-  std::vector<i64> symtab_offsets;
-  std::vector<i64> strtab_offsets;
-
-  i64 num_locals = 0;
-  i64 num_globals = 0;
-  i64 num_undefs = 0;
+  i64 globals_offset = 0;
+  i64 undefs_offset = 0;
 };
 
 template <typename E>

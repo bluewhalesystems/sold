@@ -76,11 +76,11 @@ static std::vector<u8> create_dysymtab_cmd(Context<E> &ctx) {
   cmd.cmdsize = buf.size();
 
   cmd.ilocalsym = 0;
-  cmd.nlocalsym = ctx.symtab.num_locals;
-  cmd.iextdefsym = ctx.symtab.num_locals;
-  cmd.nextdefsym = ctx.symtab.num_globals;
-  cmd.iundefsym = ctx.symtab.num_locals + ctx.symtab.num_globals;
-  cmd.nundefsym = ctx.symtab.num_undefs;
+  cmd.nlocalsym = ctx.symtab.globals_offset;
+  cmd.iextdefsym = ctx.symtab.globals_offset;
+  cmd.nextdefsym = ctx.symtab.undefs_offset - ctx.symtab.globals_offset;
+  cmd.iundefsym = ctx.symtab.undefs_offset;
+  cmd.nundefsym = ctx.symtab.hdr.size / sizeof(MachSym) - ctx.symtab.undefs_offset;
   return buf;
 }
 
@@ -1020,70 +1020,89 @@ void FunctionStartsSection<E>::copy_buf(Context<E> &ctx) {
   write_vector(ctx.buf + this->hdr.offset, contents);
 }
 
+// The symbol table in an output file is sorted by symbol type (local,
+// global or undef).
 template <typename E>
 void SymtabSection<E>::compute_size(Context<E> &ctx) {
-  symtab_offsets.clear();
-  symtab_offsets.resize(ctx.objs.size() + ctx.dylibs.size() + 1);
+  std::vector<InputFile<E> *> files;
+  append(files, ctx.objs);
+  append(files, ctx.dylibs);
 
-  strtab_offsets.clear();
-  strtab_offsets.resize(ctx.objs.size() + ctx.dylibs.size() + 1);
-  strtab_offsets[0] = 1;
-
-  tbb::enumerable_thread_specific<i64> locals;
-  tbb::enumerable_thread_specific<i64> globals;
-  tbb::enumerable_thread_specific<i64> undefs;
-
-  // Calculate the sizes for -add_ast_path symbols.
-  locals.local() += ctx.arg.add_ast_path.size();
-  symtab_offsets[0] += ctx.arg.add_ast_path.size();
-  for (std::string_view s : ctx.arg.add_ast_path)
-    strtab_offsets[0] += s.size() + 1;
-
-  // Calculate the sizes required for symbols in input files.
-  auto count = [&](Symbol<E> *sym) {
-    if (sym->is_imported)
-      undefs.local() += 1;
-    else if (sym->scope == SCOPE_EXTERN)
-      globals.local() += 1;
-    else
-      locals.local() += 1;
+  auto is_alive = [](Symbol<E> &sym) {
+    if (sym.file->is_dylib)
+      return sym.stub_idx != -1 || sym.got_idx != -1;
+    return !sym.subsec || sym.subsec->is_alive;
   };
 
-  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
-    ObjectFile<E> &file = *ctx.objs[i];
-    for (Symbol<E> *sym : file.syms) {
-      if (sym && sym->file == &file && (!sym->subsec || sym->subsec->is_alive)) {
-        symtab_offsets[i + 1]++;
-        strtab_offsets[i + 1] += sym->name.size() + 1;
-        count(sym);
+  // Compute the number of symbols for each symbol type
+  tbb::parallel_for_each(files, [&](InputFile<E> *file) {
+    for (Symbol<E> *sym : file->syms) {
+      if (sym && sym->file == file && is_alive(*sym)) {
+        if (sym->is_imported)
+          file->num_undefs++;
+        else if (sym->scope == SCOPE_EXTERN)
+          file->num_globals++;
+        else
+          file->num_locals++;
+
+        file->strtab_size += sym->name.size() + 1;
       }
     }
   });
 
-  tbb::parallel_for((i64)0, (i64)ctx.dylibs.size(), [&](i64 i) {
-    DylibFile<E> &file = *ctx.dylibs[i];
-    for (Symbol<E> *sym : file.syms) {
-      if (sym && sym->file == &file &&
-          (sym->stub_idx != -1 || sym->got_idx != -1)) {
-        symtab_offsets[i + 1 + ctx.objs.size()]++;
-        strtab_offsets[i + 1 + ctx.objs.size()] += sym->name.size() + 1;
-        count(sym);
+  // Compute the indices in the symbol table
+  InputFile<E> &first = *files.front();
+  InputFile<E> &last = *files.back();
+
+  // Add -add_ast_path symbols first
+  first.locals_offset = ctx.arg.add_ast_path.size();
+  for (std::string_view s : ctx.arg.add_ast_path)
+    first.strtab_offset += s.size() + 1;
+
+  // Add input file symbols
+  for (i64 i = 1; i < files.size(); i++)
+    files[i]->locals_offset =
+      files[i - 1]->locals_offset + files[i - 1]->num_locals;
+
+  globals_offset = last.locals_offset + last.num_locals;
+  first.globals_offset = globals_offset;
+
+  for (i64 i = 1; i < files.size(); i++)
+    files[i]->globals_offset =
+      files[i - 1]->globals_offset + files[i - 1]->num_globals;
+
+  undefs_offset = last.globals_offset + last.num_globals;
+  first.undefs_offset = undefs_offset;
+
+  for (i64 i = 1; i < files.size(); i++)
+    files[i]->undefs_offset =
+      files[i - 1]->undefs_offset + files[i - 1]->num_undefs;
+
+  for (i64 i = 1; i < files.size(); i++)
+    files[i]->strtab_offset =
+      files[i - 1]->strtab_offset + files[i - 1]->strtab_size;
+
+  i64 num_symbols = last.undefs_offset + last.num_undefs;
+  this->hdr.size = num_symbols * sizeof(MachSym);
+  ctx.strtab.hdr.size = last.strtab_offset + last.strtab_size;
+
+  // Update symbol's output_symtab_idx
+  tbb::parallel_for_each(files, [&](InputFile<E> *file) {
+    i64 locals = file->locals_offset;
+    i64 globals = file->globals_offset;
+    i64 undefs = file->undefs_offset;
+
+    for (Symbol<E> *sym : file->syms) {
+      if (sym && sym->file == file && is_alive(*sym)) {
+        if (sym->is_imported)
+          sym->output_symtab_idx = undefs++;
+        else if (sym->scope == SCOPE_EXTERN)
+          sym->output_symtab_idx = globals++;
+        else
+          sym->output_symtab_idx = locals++;
       }
     }
   });
-
-  num_locals = locals.combine(std::plus());
-  num_globals = globals.combine(std::plus());
-  num_undefs = undefs.combine(std::plus());
-
-  for (i64 i = 1; i < symtab_offsets.size(); i++)
-    symtab_offsets[i] += symtab_offsets[i - 1];
-
-  for (i64 i = 1; i < strtab_offsets.size(); i++)
-    strtab_offsets[i] += strtab_offsets[i - 1];
-
-  this->hdr.size = symtab_offsets.back() * sizeof(MachSym);
-  ctx.strtab.hdr.size = strtab_offsets.back();
 }
 
 template <typename E>
@@ -1101,9 +1120,7 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
       MachSym &msym = buf[symoff++];
       msym.stroff = stroff;
       msym.n_type = N_AST;
-
-      write_string(strtab + stroff, s);
-      stroff += s.size() + 1;
+      stroff += write_string(strtab + stroff, s);
     }
   }
 
@@ -1114,79 +1131,45 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
   Symbol<E> *mh_bundle_header = get_symbol(ctx, "__mh_bundle_header");
   Symbol<E> *dso_handle = get_symbol(ctx, "___dso_handle");
 
-  auto write = [&](Symbol<E> &sym, i64 symoff, i64 stroff) {
-    MachSym &msym = buf[symoff];
+  std::vector<InputFile<E> *> files;
+  append(files, ctx.objs);
+  append(files, ctx.dylibs);
 
-    msym.stroff = stroff;
-    write_string(strtab + stroff, sym.name);
+  tbb::parallel_for_each(files, [&](InputFile<E> *file) {
+    i64 stroff = file->strtab_offset;
+    for (Symbol<E> *sym : file->syms) {
+      if (!sym || sym->file != file || sym->output_symtab_idx == -1)
+        continue;
 
-    msym.is_extern = (sym.is_imported || sym.scope == SCOPE_EXTERN);
-    msym.type = (sym.is_imported ? N_UNDF : N_SECT);
+      MachSym &msym = buf[sym->output_symtab_idx];
+      msym.stroff = stroff;
+      stroff += write_string(strtab + stroff, sym->name);
 
-    if (sym.is_imported)
-      msym.sect = N_UNDF;
-    else if (sym.subsec)
-      msym.sect = sym.subsec->isec.osec.sect_idx;
-    else if (&sym == mh_execute_header)
-      msym.sect = ctx.text->sect_idx;
-    else if (&sym == dyld_private || &sym == mh_dylib_header ||
-             &sym == mh_bundle_header || &sym == dso_handle)
-      msym.sect = ctx.data->sect_idx;
-    else
-      msym.sect = N_ABS;
+      msym.is_extern = (sym->is_imported || sym->scope == SCOPE_EXTERN);
+      msym.type = (sym->is_imported ? N_UNDF : N_SECT);
 
-    if (sym.file->is_dylib)
-      msym.desc = ((DylibFile<E> *)sym.file)->dylib_idx << 8;
-    else if (sym.is_imported)
-      msym.desc = DYNAMIC_LOOKUP_ORDINAL << 8;
-    else if (sym.referenced_dynamically)
-      msym.desc = REFERENCED_DYNAMICALLY;
+      if (sym->is_imported)
+        msym.sect = N_UNDF;
+      else if (sym->subsec)
+        msym.sect = sym->subsec->isec.osec.sect_idx;
+      else if (sym == mh_execute_header)
+        msym.sect = ctx.text->sect_idx;
+      else if (sym == dyld_private || sym == mh_dylib_header ||
+               sym == mh_bundle_header || sym == dso_handle)
+        msym.sect = ctx.data->sect_idx;
+      else
+        msym.sect = N_ABS;
 
-    if (!sym.is_imported && (!sym.subsec || sym.subsec->is_alive))
-      msym.value = sym.get_addr(ctx);
-  };
+      if (sym->file->is_dylib)
+        msym.desc = ((DylibFile<E> *)sym->file)->dylib_idx << 8;
+      else if (sym->is_imported)
+        msym.desc = DYNAMIC_LOOKUP_ORDINAL << 8;
+      else if (sym->referenced_dynamically)
+        msym.desc = REFERENCED_DYNAMICALLY;
 
-  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
-    ObjectFile<E> &file = *ctx.objs[i];
-    i64 symoff = symtab_offsets[i];
-    i64 stroff = strtab_offsets[i];
-
-    for (Symbol<E> *sym : file.syms) {
-      if (sym && sym->file == &file && (!sym->subsec || sym->subsec->is_alive)) {
-        write(*sym, symoff, stroff);
-        symoff++;
-        stroff += sym->name.size() + 1;
-      }
+      if (!sym->is_imported && (!sym->subsec || sym->subsec->is_alive))
+        msym.value = sym->get_addr(ctx);
     }
-  });
-
-  tbb::parallel_for((i64)0, (i64)ctx.dylibs.size(), [&](i64 i) {
-    DylibFile<E> &file = *ctx.dylibs[i];
-    i64 symoff = symtab_offsets[i + ctx.objs.size()];
-    i64 stroff = strtab_offsets[i + ctx.objs.size()];
-
-    for (Symbol<E> *sym : file.syms) {
-      if (sym && sym->file == &file &&
-          (sym->stub_idx != -1 || sym->got_idx != -1)) {
-        write(*sym, symoff, stroff);
-        symoff++;
-        stroff += sym->name.size() + 1;
-      }
-    }
-  });
-
-  auto get_rank = [](const MachSym &msym) {
-    if (msym.sect == N_UNDF)
-      return 2;
-    if (msym.is_extern)
-      return 1;
-    return 0;
-  };
-
-  tbb::parallel_sort(buf, buf + this->hdr.size / sizeof(MachSym),
-                     [&](const MachSym &a, const MachSym &b) {
-     return std::tuple{get_rank(a), a.value, a.stroff} <
-            std::tuple{get_rank(b), b.value, b.stroff};
   });
 }
 
