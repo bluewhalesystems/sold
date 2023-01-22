@@ -851,7 +851,6 @@ void do_lto(Context<E> &ctx);
 //
 
 void create_range_extension_thunks(Context<ARM64> &ctx, OutputSection<ARM64> &osec);
-void apply_linker_optimization_hints(Context<ARM64> &ctx);
 
 //
 // main.cc
@@ -920,7 +919,6 @@ struct Context {
     bool export_dynamic = false;
     bool fatal_warnings = false;
     bool function_starts = true;
-    bool ignore_optimization_hints = true;
     bool mark_dead_strippable_dylib = false;
     bool noinhibit_exec = false;
     bool perf = false;
