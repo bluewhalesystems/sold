@@ -373,6 +373,7 @@ if(MOLD_IS_SOLD)
   target_sources(mold PRIVATE
     macho/arch-arm64.cc
     macho/arch-x86-64.cc
+    macho/thunks.cc
     macho/yaml.cc
     )
 endif()
