@@ -4,7 +4,7 @@ namespace mold::macho {
 
 template <typename E>
 OutputSection<E> &get_output_section(Context<E> &ctx, const MachSection &hdr) {
-  static std::unordered_set<std::string_view> set = {
+  static std::unordered_set<std::string_view> data_const_set = {
     "__got", "__auth_got", "__auth_ptr", "__nl_symbol_ptr", "__const",
     "__cfstring", "__mod_init_func", "__mod_term_func", "__objc_classlist",
     "__objc_nlclslist", "__objc_catlist", "__objc_nlcatlist", "__objc_protolist",
@@ -13,7 +13,7 @@ OutputSection<E> &get_output_section(Context<E> &ctx, const MachSection &hdr) {
   std::string_view seg = hdr.get_segname();
   std::string_view sect = hdr.get_sectname();
 
-  if (seg == "__DATA" && set.contains(sect)) {
+  if (seg == "__DATA" && data_const_set.contains(sect)) {
     seg = "__DATA_CONST";
   } else if (seg == "__TEXT" && sect == "__StaticInit") {
     sect = "__text";
@@ -41,14 +41,16 @@ void InputSection<E>::parse_relocations(Context<E> &ctx) {
   });
 
   // Find subsections this relocation section refers to
-  auto cmp = [](Subsection<E> *subsec, u32 addr) {
-    return subsec->input_addr < addr;
-  };
+  auto begin = std::partition_point(file.subsections.begin(),
+                                    file.subsections.end(),
+                                    [&](Subsection<E> *subsec) {
+    return subsec->input_addr < hdr.addr;
+  });
 
-  auto begin = std::lower_bound(file.subsections.begin(),
-                                file.subsections.end(), hdr.addr, cmp);
-  auto end = std::lower_bound(begin, file.subsections.end(),
-                              hdr.addr + hdr.size, cmp);
+  auto end = std::partition_point(begin, file.subsections.end(),
+                                  [&](Subsection<E> *subsec) {
+    return subsec->input_addr < hdr.addr + hdr.size;
+  });
 
   // Assign each subsection a group of relocations
   i64 i = 0;
