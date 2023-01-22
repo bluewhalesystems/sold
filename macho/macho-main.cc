@@ -420,16 +420,14 @@ static void create_synthetic_chunks(Context<E> &ctx) {
 // Split S_CSTRING_LITERALS subsections by contents.
 template <typename E>
 static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
-  Timer t(ctx, "uniquify_cstrings");
+  Timer t(ctx, "uniquify_cstrings " + std::string(osec.hdr.get_sectname()));
 
   struct Entry {
     Entry(Subsection<E> *subsec) : owner(subsec) {}
+    Entry(const Entry &other) = default;
 
-    Entry(const Entry &other) :
-      owner(other.owner.load()), p2align(other.p2align.load()) {}
-
-    std::atomic<Subsection<E> *> owner = nullptr;
-    std::atomic_uint8_t p2align = 0;
+    Atomic<Subsection<E> *> owner = nullptr;
+    Atomic<u8> p2align = 0;
   };
 
   struct SubsecRef {
@@ -460,16 +458,18 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
 
   // Insert all strings into the hash table.
   tbb::parallel_for_each(vec, [&](SubsecRef &ref) {
-    if (ref.subsec) {
-      std::string_view s = ref.subsec->get_contents();
-      ref.ent = map.insert(s, ref.hash, {ref.subsec}).first;
+    if (!ref.subsec)
+      return;
 
-      Subsection<E> *existing = ref.ent->owner;
-      while (existing->isec.file.priority < ref.subsec->isec.file.priority &&
-             !ref.ent->owner.compare_exchange_weak(existing, ref.subsec));
+    std::string_view s = ref.subsec->get_contents();
+    ref.ent = map.insert(s, ref.hash, {ref.subsec}).first;
 
-      update_maximum(ref.ent->p2align, ref.subsec->p2align.load());
-    }
+    Subsection<E> *existing = ref.ent->owner;
+    while (existing->isec.file.priority < ref.subsec->isec.file.priority &&
+           !ref.ent->owner.compare_exchange_weak(existing, ref.subsec,
+                                                 std::memory_order_relaxed));
+
+    update_maximum(ref.ent->p2align, ref.subsec->p2align.load());
   });
 
   // Decide who will become the owner for each subsection.
@@ -547,10 +547,11 @@ static void merge_mergeable_sections(Context<E> &ctx) {
   append(files, ctx.objs);
   append(files, ctx.dylibs);
 
-  for (InputFile<E> *file: files)
+  tbb::parallel_for_each(files, [&](InputFile<E> *file) {
     for (Symbol<E> *sym : file->syms)
-      if (sym && sym->subsec && sym->subsec->replacer)
+      if (sym && sym->file == file && sym->subsec && sym->subsec->replacer)
         sym->subsec = sym->subsec->replacer;
+  });
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->subsections, [](Subsection<E> *subsec) {
