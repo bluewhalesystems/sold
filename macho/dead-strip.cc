@@ -1,14 +1,14 @@
 #include "mold.h"
 
+#include <tbb/concurrent_vector.h>
 #include <tbb/parallel_for_each.h>
 
 namespace mold::macho {
 
 template <typename E>
-static std::vector<Subsection<E> *> collect_root_set(Context<E> &ctx) {
+static void collect_root_set(Context<E> &ctx,
+                             tbb::concurrent_vector<Subsection<E> *> &rootset) {
   Timer t(ctx, "collect_root_set");
-
-  std::vector<Subsection<E> *> rootset;
 
   auto add = [&](Symbol<E> *sym) {
     if (sym->subsec)
@@ -18,13 +18,15 @@ static std::vector<Subsection<E> *> collect_root_set(Context<E> &ctx) {
   auto keep = [&](Symbol<E> *sym) {
     if (sym->no_dead_strip)
       return true;
+    if (sym->referenced_dynamically)
+      return true;
     if (ctx.output_type == MH_DYLIB || ctx.output_type == MH_BUNDLE)
-      if (sym->scope == SCOPE_EXTERN || sym->referenced_dynamically)
+      if (sym->scope == SCOPE_EXTERN)
         return true;
     return false;
   };
 
-  for (ObjectFile<E> *file : ctx.objs) {
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (Symbol<E> *sym : file->syms)
       if (sym->file == file && keep(sym))
         add(sym);
@@ -35,7 +37,7 @@ static std::vector<Subsection<E> *> collect_root_set(Context<E> &ctx) {
           hdr.type == S_MOD_INIT_FUNC_POINTERS ||
           hdr.type == S_MOD_TERM_FUNC_POINTERS)
         rootset.push_back(subsec);
-  }
+  });
 
   for (std::string_view name : ctx.arg.u)
     if (Symbol<E> *sym = get_symbol(ctx, name); sym->file)
@@ -43,7 +45,6 @@ static std::vector<Subsection<E> *> collect_root_set(Context<E> &ctx) {
 
   add(ctx.arg.entry);
   add(get_symbol(ctx, "dyld_stub_binder"));
-  return rootset;
 }
 
 template <typename E>
@@ -84,23 +85,23 @@ static bool refers_live_subsection(Subsection<E> &subsec) {
 }
 
 template <typename E>
-static void mark(Context<E> &ctx, const std::vector<Subsection<E> *> &rootset) {
+static void mark(Context<E> &ctx,
+                 tbb::concurrent_vector<Subsection<E> *> &rootset) {
   Timer t(ctx, "mark");
 
   tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
     for (Subsection<E> *subsec : file->subsections)
-      subsec->is_alive.store(false, std::memory_order_relaxed);
+      subsec->is_alive = false;
   });
 
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-
-  for (Subsection<E> *subsec : rootset)
+  tbb::parallel_for_each(rootset, [&](Subsection<E> *subsec) {
     visit(ctx, *subsec);
+  });
 
-  bool repeat;
+  Atomic<bool> repeat;
   do {
     repeat = false;
-    for (ObjectFile<E> *file : ctx.objs) {
+    tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
       for (Subsection<E> *subsec : file->subsections) {
         if ((subsec->isec.hdr.attr & S_ATTR_LIVE_SUPPORT) &&
             !subsec->is_alive &&
@@ -109,7 +110,7 @@ static void mark(Context<E> &ctx, const std::vector<Subsection<E> *> &rootset) {
           repeat = true;
         }
       }
-    }
+    });
   } while (repeat);
 }
 
@@ -134,7 +135,8 @@ template <typename E>
 void dead_strip(Context<E> &ctx) {
   Timer t(ctx, "dead_strip");
 
-  std::vector<Subsection<E> *> rootset = collect_root_set(ctx);
+  tbb::concurrent_vector<Subsection<E> *> rootset;
+  collect_root_set(ctx, rootset);
   mark(ctx, rootset);
   sweep(ctx);
 }
