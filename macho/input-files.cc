@@ -157,68 +157,121 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
   }
 }
 
-template <typename E>
-void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
-  struct MachSymOff {
-    MachSym *msym;
-    i64 symidx;
-  };
+struct SplitRegion {
+  u32 offset;
+  u32 size;
+  u32 symidx;
+  bool is_alt_entry;
+};
 
-  std::vector<MachSymOff> msyms;
+template <typename E>
+struct SplitInfo {
+  InputSection<E> *isec;
+  std::vector<SplitRegion> regions;
+};
+
+template <typename E>
+static std::vector<SplitInfo<E>>
+split_regular_sections(Context<E> &ctx, ObjectFile<E> &file) {
+  std::vector<SplitInfo<E>> vec(file.sections.size());
+
+  for (i64 i = 0; i < file.sections.size(); i++)
+    if (InputSection<E> *isec = file.sections[i].get())
+      if (isec->hdr.type != S_CSTRING_LITERALS &&
+          isec->hdr.type != S_LITERAL_POINTERS)
+        vec[i].isec = isec;
 
   // Find all symbols whose type is N_SECT.
-  for (i64 i = 0; i < mach_syms.size(); i++)
-    if (MachSym &msym = mach_syms[i];
-        !msym.stab && msym.type == N_SECT && sections[msym.sect - 1])
-      msyms.push_back({&msym, i});
+  for (i64 i = 0; i < file.mach_syms.size(); i++) {
+    MachSym &msym = file.mach_syms[i];
+    if (!msym.stab && msym.type == N_SECT && vec[msym.sect - 1].isec) {
+      SplitRegion r;
+      r.offset = msym.value - vec[msym.sect - 1].isec->hdr.addr;
+      r.symidx = i;
+      r.is_alt_entry = (msym.desc & N_ALT_ENTRY);
+      vec[msym.sect - 1].regions.push_back(r);
+    }
+  }
 
-  // Sort by address
-  sort(msyms, [](const MachSymOff &a, const MachSymOff &b) {
-    return a.msym->value < b.msym->value;
+  std::erase_if(vec, [](const SplitInfo<E> &info) { return !info.isec; });
+
+  sort(vec, [](const SplitInfo<E> &a, const SplitInfo<E> &b) {
+    return a.isec->hdr.addr < b.isec->hdr.addr;
   });
 
+  for (SplitInfo<E> &info : vec) {
+    sort(info.regions, [](const SplitRegion &a, const SplitRegion &b) {
+      return a.offset < b.offset;
+    });
+  }
+
+  // If two symbols point to the same location, we create only one
+  // subsection.
+  for (SplitInfo<E> &info : vec) {
+    i64 last = -1;
+    for (SplitRegion &r : info.regions) {
+      if (!r.is_alt_entry) {
+        if (r.offset == last)
+          r.is_alt_entry = true;
+        last = r.offset;
+      }
+    }
+  }
+
+  // Fix regions so that they cover the entire section without overlapping.
+  for (SplitInfo<E> &info : vec) {
+    std::vector<SplitRegion> &r = info.regions;
+
+    if (r.empty()) {
+      r.push_back({0, (u32)info.isec->hdr.size, (u32)-1, false});
+      continue;
+    }
+
+    if (r[0].offset > 0)
+      r.insert(r.begin(), {0, r[0].offset, (u32)-1, false});
+
+    for (i64 i = 1; i < r.size(); i++)
+      if (r[i - 1].offset == r[i].offset)
+        r[i++].is_alt_entry = true;
+
+    i64 last = -1;
+    for (i64 i = 0; i < r.size(); i++) {
+      if (!r[i].is_alt_entry) {
+        if (last != -1)
+          r[last].size = r[i].offset - r[last].offset;
+        last = i;
+      }
+    }
+
+    if (last != -1)
+      r[last].size = info.isec->hdr.size - r[last].offset;
+  }
+  return vec;
+}
+
+template <typename E>
+void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   sym_to_subsec.resize(mach_syms.size());
 
-  // Split each input section
-  for (i64 i = 0; i < sections.size(); i++) {
-    InputSection<E> *isec = sections[i].get();
-    if (!isec || isec->hdr.type == S_CSTRING_LITERALS ||
-        isec->hdr.type == S_LITERAL_POINTERS)
-      continue;
+  // Split regular sections into subsections.
+  for (SplitInfo<E> &info : split_regular_sections(ctx, *this)) {
+    InputSection<E> &isec = *info.isec;
+    for (SplitRegion &r : info.regions) {
+      if (!r.is_alt_entry) {
+        Subsection<E> *subsec = new Subsection<E>{
+          .isec = isec,
+          .input_offset = r.offset,
+          .input_size = r.size,
+          .input_addr = (u32)(isec.hdr.addr + r.offset),
+          .p2align = (u8)isec.hdr.p2align,
+        };
 
-    // Find the symbols in the given section
-    auto less = [](MachSymOff &m, u64 addr) {
-      return m.msym->value < addr;
-    };
-
-    auto it = std::lower_bound(msyms.begin(), msyms.end(), isec->hdr.addr, less);
-
-    auto end = std::lower_bound(it, msyms.end(), isec->hdr.addr + isec->hdr.size,
-                                less);
-
-    // We start with one big subsection and split it as we process symbols
-    auto add_subsec = [&](u32 addr) {
-      Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
-        .input_offset = (u32)(addr - isec->hdr.addr),
-        .input_size = (u32)(isec->hdr.addr + isec->hdr.size - addr),
-        .input_addr = addr,
-        .p2align = (u8)isec->hdr.p2align,
-      };
-      subsec_pool.emplace_back(subsec);
-      subsections.push_back(subsec);
-    };
-
-    add_subsec(isec->hdr.addr);
-
-    for (; it != end; it++) {
-      MachSymOff &m = *it;
-      if (!(m.msym->desc & N_ALT_ENTRY)) {
-        Subsection<E> &last = *subsections.back();
-        last.input_size = m.msym->value - last.input_addr;
-        add_subsec(m.msym->value);
+        subsec_pool.emplace_back(subsec);
+        subsections.push_back(subsec);
       }
-      sym_to_subsec[m.symidx] = subsections.back();
+
+      if (r.symidx != -1)
+        sym_to_subsec[r.symidx] = subsections.back();
     }
   }
 }
