@@ -120,6 +120,8 @@ static void handle_unexported_symbols_list(Context<E> &ctx) {
 
 template <typename E>
 static void create_internal_file(Context<E> &ctx) {
+  Timer t(ctx, "create_internal_file");
+
   ObjectFile<E> *obj = new ObjectFile<E>;
   obj->is_alive = true;
   obj->mach_syms = obj->mach_syms2;
@@ -559,6 +561,8 @@ static void merge_mergeable_sections(Context<E> &ctx) {
 
 template <typename E>
 static void scan_unwind_info(Context<E> &ctx) {
+  Timer t(ctx, "scan_unwind_info");
+
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (Subsection<E> *subsec : file->subsections)
       for (UnwindRecord<E> &rec : subsec->get_unwind_records())

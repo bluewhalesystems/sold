@@ -527,22 +527,18 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
 // Ties are broken by file priority.
 template <typename E>
 static u64 get_rank(InputFile<E> *file, bool is_common, bool is_weak) {
-  if (is_common) {
-    assert(!file->is_dylib);
-    if (!file->is_alive)
-      return (6 << 24) + file->priority;
-    return (5 << 24) + file->priority;
-  }
+  auto get_sym_rank = [&] {
+    if (is_common) {
+      assert(!file->is_dylib);
+      return !file->is_alive ? 6 : 5;
+    }
 
-  if (file->is_dylib || !file->is_alive) {
-    if (is_weak)
-      return (4 << 24) + file->priority;
-    return (3 << 24) + file->priority;
-  }
+    if (file->is_dylib || !file->is_alive)
+      return is_weak ? 4 : 3;
+    return is_weak ? 2 : 1;
+  };
 
-  if (is_weak)
-    return (2 << 24) + file->priority;
-  return (1 << 24) + file->priority;
+  return (get_sym_rank() << 24) + file->priority;
 }
 
 template <typename E>
