@@ -1478,7 +1478,7 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
   uhdr.page_count = pages.size() + 1;
 
   // Write the personalities
-  u32 *per = (u32 *)(buf.data() + sizeof(uhdr));
+  ul32 *per = (ul32 *)(buf.data() + sizeof(uhdr));
   for (u64 addr : personalities)
     *per++ = addr;
 
@@ -1518,7 +1518,7 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
     page2->encoding_offset = (u8 *)entry - (u8 *)page2;
     page2->encoding_count = map.size();
 
-    u32 *encoding = (u32 *)entry;
+    ul32 *encoding = (ul32 *)entry;
     for (std::pair<u32, u32> kv : map)
       encoding[kv.second] = kv.first;
 
