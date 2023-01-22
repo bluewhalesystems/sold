@@ -395,18 +395,19 @@ class RangeExtensionThunk {};
 template <>
 class RangeExtensionThunk<ARM64> {
 public:
-  RangeExtensionThunk(OutputSection<ARM64> &osec)
-    : output_section(osec) {}
+  RangeExtensionThunk(OutputSection<ARM64> &osec, i64 thunk_idx, i64 offset)
+    : output_section(osec), thunk_idx(thunk_idx), offset(offset) {}
 
   i64 size() const { return symbols.size() * ENTRY_SIZE; }
   u64 get_addr(i64 idx) const;
   void copy_buf(Context<ARM64> &ctx);
 
+  static constexpr i64 ALIGNMENT = 16;
   static constexpr i64 ENTRY_SIZE = 12;
 
   OutputSection<ARM64> &output_section;
-  i32 thunk_idx = -1;
-  i64 offset = -1;
+  i64 thunk_idx;
+  i64 offset;
   std::mutex mu;
   std::vector<Symbol<ARM64> *> symbols;
 };

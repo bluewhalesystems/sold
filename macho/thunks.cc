@@ -11,7 +11,10 @@ using E = ARM64;
 static constexpr i64 MAX_DISTANCE = 100 * 1024 * 1024;
 
 // We create a thunk for each 10 MiB input sections.
-static constexpr i64 GROUP_SIZE = 10 * 1024 * 1024;
+static constexpr i64 BATCH_SIZE = 10 * 1024 * 1024;
+
+// We assume that a single thunk group is smaller than 100 KiB.
+static constexpr i64 MAX_THUNK_SIZE = 102400;
 
 static bool is_reachable(Context<E> &ctx, Symbol<E> &sym,
                          Subsection<E> &subsec, Relocation<E> &rel) {
@@ -49,17 +52,17 @@ static void reset_thunk(RangeExtensionThunk<E> &thunk) {
 // sequence that construct a full 32 bit address in a register and
 // jump there. That linker-synthesized code is called "thunk".
 void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
-  std::span<Subsection<E> *> members = osec.members;
-  if (members.empty())
+  std::span<Subsection<E> *> m = osec.members;
+  if (m.empty())
     return;
 
-  members[0]->output_offset = 0;
+  m[0]->output_offset = 0;
 
   // Initialize input sections with a dummy offset so that we can
   // distinguish sections that have got an address with the one who
   // haven't.
-  tbb::parallel_for((i64)1, (i64)members.size(), [&](i64 i) {
-    members[i]->output_offset = -1;
+  tbb::parallel_for((i64)1, (i64)m.size(), [&](i64 i) {
+    m[i]->output_offset = -1;
   });
 
   // We create thunks from the beginning of the section to the end.
@@ -70,39 +73,44 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
   i64 c = 0;
   i64 d = 0;
   i64 offset = 0;
+  i64 thunk_idx = 0;
 
-  while (b < members.size()) {
+  while (b < m.size()) {
     // Move D foward as far as we can jump from B to D.
-    while (d < members.size() &&
-           offset - members[b]->output_offset < MAX_DISTANCE) {
-      offset = align_to(offset, 1 << members[d]->p2align);
-      members[d]->output_offset = offset;
-      offset += members[d]->input_size;
+    while (d < m.size() &&
+           align_to(offset, 1 << m[d]->p2align) + m[d]->input_size <
+           m[b]->output_offset + MAX_DISTANCE - MAX_THUNK_SIZE) {
+      offset = align_to(offset, 1 << m[d]->p2align);
+      m[d]->output_offset = offset;
+      offset += m[d]->input_size;
       d++;
     }
 
-    // Move C forward so that C is apart from B by GROUP_SIZE.
-    while (c < members.size() &&
-           members[c]->output_offset - members[b]->output_offset < GROUP_SIZE)
+    // Move C forward so that C is apart from B by BATCH_SIZE.
+    c = b + 1;
+    while (c < m.size() &&
+           m[c]->output_offset + m[c]->input_size <
+           m[b]->output_offset + BATCH_SIZE)
       c++;
 
     // Move A forward so that A is reachable from C.
-    if (c > 0) {
-      i64 c_end = members[c - 1]->output_offset + members[c - 1]->input_size;
-      while (a < osec.thunks.size() &&
-             osec.thunks[a]->offset < c_end - MAX_DISTANCE)
-        reset_thunk(*osec.thunks[a++]);
-    }
+    i64 c_offset = (c == m.size()) ? offset : m[c]->output_offset;
+    while (a < m.size() && m[a]->output_offset + MAX_DISTANCE < c_offset)
+      a++;
+
+    // Erase references to out-of-range thunks.
+    while (thunk_idx < osec.thunks.size() &&
+           osec.thunks[thunk_idx]->offset < m[a]->output_offset)
+      reset_thunk(*osec.thunks[thunk_idx++]);
 
     // Create a thunk for input sections between B and C and place it at D.
-    osec.thunks.emplace_back(new RangeExtensionThunk<E>{osec});
-
-    RangeExtensionThunk<E> &thunk = *osec.thunks.back();
-    thunk.thunk_idx = osec.thunks.size() - 1;
-    thunk.offset = offset;
+    offset = align_to(offset, RangeExtensionThunk<E>::ALIGNMENT);
+    RangeExtensionThunk<E> *thunk =
+      new RangeExtensionThunk<E>(osec, osec.thunks.size(), offset);
+    osec.thunks.emplace_back(thunk);
 
     // Scan relocations between B and C to collect symbols that need thunks.
-    tbb::parallel_for_each(members.begin() + b, members.begin() + c,
+    tbb::parallel_for_each(m.begin() + b, m.begin() + c,
                            [&](Subsection<E> *subsec) {
       std::span<Relocation<E>> rels = subsec->get_rels();
 
@@ -123,38 +131,38 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
         }
 
         // Otherwise, add the symbol to this thunk if it's not added already.
-        r.thunk_idx = thunk.thunk_idx;
+        r.thunk_idx = thunk->thunk_idx;
         r.thunk_sym_idx = -1;
 
         if (!(r.sym->flags.fetch_or(NEEDS_RANGE_EXTN_THUNK) &
               NEEDS_RANGE_EXTN_THUNK)) {
-          std::scoped_lock lock(thunk.mu);
-          thunk.symbols.push_back(r.sym);
+          std::scoped_lock lock(thunk->mu);
+          thunk->symbols.push_back(r.sym);
         }
       }
     });
 
     // Now that we know the number of symbols in the thunk, we can compute
     // its size.
-    offset += thunk.size();
+    offset += thunk->size();
 
     // Sort symbols added to the thunk to make the output deterministic.
-    sort(thunk.symbols, [](Symbol<E> *a, Symbol<E> *b) {
+    sort(thunk->symbols, [](Symbol<E> *a, Symbol<E> *b) {
       return std::tuple{a->file->priority, a->value} <
              std::tuple{b->file->priority, b->value};
     });
 
     // Assign offsets within the thunk to the symbols.
-    for (i64 i = 0; Symbol<E> *sym : thunk.symbols) {
-      sym->thunk_idx = thunk.thunk_idx;
+    for (i64 i = 0; Symbol<E> *sym : thunk->symbols) {
+      sym->thunk_idx = thunk->thunk_idx;
       sym->thunk_sym_idx = i++;
     }
 
-    // Scan relocations again to fix symbol offsets in the last thunk.
-    tbb::parallel_for_each(members.begin() + b, members.begin() + c,
+    // Scan relocations again to fix symbol offsets in the last thunk->
+    tbb::parallel_for_each(m.begin() + b, m.begin() + c,
                            [&](Subsection<E> *subsec) {
       for (Relocation<E> &r : subsec->get_rels())
-        if (r.thunk_idx == thunk.thunk_idx)
+        if (r.thunk_idx == thunk->thunk_idx)
           r.thunk_sym_idx = r.sym->thunk_sym_idx;
     });
 
@@ -162,8 +170,8 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
     b = c;
   }
 
-  while (a < osec.thunks.size())
-    reset_thunk(*osec.thunks[a++]);
+  while (thunk_idx < osec.thunks.size())
+    reset_thunk(*osec.thunks[thunk_idx++]);
 
   osec.hdr.size = offset;
 }
