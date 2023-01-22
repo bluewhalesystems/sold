@@ -8,15 +8,19 @@ template <>
 void StubsSection<E>::copy_buf(Context<E> &ctx) {
   u8 *buf = ctx.buf + this->hdr.offset;
 
+  static const u8 insn[] = {
+    0xff, 0x25, 0, 0, 0, 0, // jmp *imm(%rip)
+  };
+
+  static_assert(E::stub_size == sizeof(insn));
+
   for (i64 i = 0; i < syms.size(); i++) {
-    // `ff 25 xx xx xx xx` is a RIP-relative indirect jump instruction,
-    // i.e., `jmp *IMM(%rip)`. It loads an address from la_symbol_ptr
-    // and jump there.
-    static_assert(E::stub_size == 6);
-    buf[i * 6] = 0xff;
-    buf[i * 6 + 1] = 0x25;
-    *(ul32 *)(buf + i * 6 + 2) =
-      ctx.lazy_symbol_ptr.hdr.addr + i * word_size - (this->hdr.addr + i * 6 + 6);
+    memcpy(buf, insn, sizeof(insn));
+
+    u64 dest = ctx.lazy_symbol_ptr.hdr.addr + i * word_size;
+    u64 src = this->hdr.addr + i * 6 + 6;
+    *(ul32 *)(buf + 2) = dest - src;
+    buf += sizeof(insn);
   }
 }
 
