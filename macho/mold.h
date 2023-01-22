@@ -652,7 +652,7 @@ public:
   std::vector<Subsection<E> *> methnames;
   std::vector<Subsection<E> *> selrefs;
 
-  static constexpr i64 ENTRY_SIZE = std::is_same_v<E, ARM64> ? 32 : 16;
+  static constexpr i64 ENTRY_SIZE = is_arm<E> ? 32 : 16;
 };
 
 template <typename E>
@@ -908,7 +908,7 @@ struct Context {
     Symbol<E> *entry = nullptr;
     UuidKind uuid = UUID_HASH;
     bool ObjC = false;
-    bool adhoc_codesign = std::is_same_v<E, ARM64>;
+    bool adhoc_codesign = is_arm<E>;
     bool application_extension = false;
     bool color_diagnostics = false;
     bool dead_strip = false;

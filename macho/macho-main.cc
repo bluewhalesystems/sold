@@ -714,7 +714,7 @@ static void copy_sections_to_output_file(Context<E> &ctx) {
     // that otool wouldn't out-of-sync when disassembling an output file.
     // Do this only for x86-64 because ARM64 instructions are always 4
     // bytes long.
-    if constexpr (std::is_same_v<E, X86_64>)
+    if constexpr (is_x86<E>)
       if (seg->cmd.get_segname() == "__TEXT")
         memset(ctx.buf + seg->cmd.fileoff, 0x90, seg->cmd.filesize);
 

@@ -14,6 +14,12 @@ struct ARM64;
 struct X86_64;
 
 template <typename E>
+static constexpr bool is_arm = std::is_same_v<E, ARM64>;
+
+template <typename E>
+static constexpr bool is_x86 = std::is_same_v<E, X86_64>;
+
+template <typename E>
 std::string rel_to_string(u8 r_type);
 
 enum : u32 {
@@ -691,10 +697,12 @@ struct MachRel {
 
 // __TEXT,__unwind_info section contents
 
-static constexpr u32 UNWIND_SECTION_VERSION = 1;
-static constexpr u32 UNWIND_SECOND_LEVEL_REGULAR = 2;
-static constexpr u32 UNWIND_SECOND_LEVEL_COMPRESSED = 3;
-static constexpr u32 UNWIND_PERSONALITY_MASK = 0x30000000;
+enum : u32 {
+  UNWIND_SECTION_VERSION = 1,
+  UNWIND_SECOND_LEVEL_REGULAR = 2,
+  UNWIND_SECOND_LEVEL_COMPRESSED = 3,
+  UNWIND_PERSONALITY_MASK = 0x30000000,
+};
 
 struct UnwindSectionHeader {
   ul32 version;

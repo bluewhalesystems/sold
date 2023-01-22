@@ -396,7 +396,7 @@ OutputSection<E>::get_instance(Context<E> &ctx, std::string_view segname,
 
 template <typename E>
 void OutputSection<E>::compute_size(Context<E> &ctx) {
-  if constexpr (std::is_same_v<E, ARM64>) {
+  if constexpr (is_arm<E>) {
     if (this->hdr.attr & S_ATTR_SOME_INSTRUCTIONS ||
         this->hdr.attr & S_ATTR_PURE_INSTRUCTIONS) {
       create_range_extension_thunks(ctx, *this);
@@ -431,7 +431,7 @@ void OutputSection<E>::copy_buf(Context<E> &ctx) {
     subsec->apply_reloc(ctx, loc);
   });
 
-  if constexpr (std::is_same_v<E, ARM64>) {
+  if constexpr (is_arm<E>) {
     tbb::parallel_for_each(thunks,
                            [&](std::unique_ptr<RangeExtensionThunk<E>> &thunk) {
       thunk->copy_buf(ctx);
@@ -1540,13 +1540,13 @@ template <typename E>
 u32 UnwindEncoder<E>::encode_personality(Context<E> &ctx, u64 addr) {
   for (i64 i = 0; i < personalities.size(); i++)
     if (personalities[i] == addr)
-      return (i + 1) << std::countr_zero(UNWIND_PERSONALITY_MASK);
+      return (i + 1) << std::countr_zero((u32)UNWIND_PERSONALITY_MASK);
 
   if (personalities.size() == 3)
     Fatal(ctx) << "too many personality functions";
 
   personalities.push_back(addr);
-  return personalities.size() << std::countr_zero(UNWIND_PERSONALITY_MASK);
+  return personalities.size() << std::countr_zero((u32)UNWIND_PERSONALITY_MASK);
 }
 
 template <typename E>

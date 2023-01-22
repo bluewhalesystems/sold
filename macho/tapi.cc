@@ -283,11 +283,12 @@ static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
 
 template <typename E>
 TextDylib parse_tbd(Context<E> &ctx, MappedFile<Context<E>> *mf) {
-  if constexpr (std::is_same_v<E, ARM64>)
+  if constexpr (is_arm<E>) {
     return parse(ctx, mf, "arm64");
-  if constexpr (std::is_same_v<E, X86_64>)
+  } else {
+    static_assert(is_x86<E>);
     return parse(ctx, mf, "x86_64");
-  unreachable();
+  }
 }
 
 using E = MOLD_TARGET;
