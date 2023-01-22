@@ -44,7 +44,7 @@
 # features and behave exactly the same.
 
 cmake_minimum_required(VERSION 3.13)
-project(mold VERSION 1.10.0)
+project(mold VERSION 1.10.1)
 
 include(CMakeDependentOption)
 include(GNUInstallDirs)
@@ -67,6 +67,10 @@ if(NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
     -Wno-sign-compare
     -Wno-unused-function
     -ggnu-pubnames)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_compile_options(mold PRIVATE -D_GLIBCXX_ASSERTIONS)
 endif()
 
 # Build mold with -flto if -DMOLD_LTO=ON

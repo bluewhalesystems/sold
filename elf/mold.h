@@ -63,10 +63,6 @@ struct SectionFragment {
   SectionFragment(MergedSection<E> *sec, bool is_alive)
     : output_section(*sec), is_alive(is_alive) {}
 
-  SectionFragment(const SectionFragment &other)
-    : output_section(other.output_section), offset(other.offset),
-      p2align(other.p2align.load()), is_alive(other.is_alive.load()) {}
-
   u64 get_addr(Context<E> &ctx) const;
 
   MergedSection<E> &output_section;
@@ -106,8 +102,8 @@ class RangeExtensionThunk {};
 template <typename E> requires needs_thunk<E>
 class RangeExtensionThunk<E> {
 public:
-  RangeExtensionThunk(OutputSection<E> &osec, i64 offset)
-    : output_section(osec), offset(offset) {}
+  RangeExtensionThunk(OutputSection<E> &osec, i64 thunk_idx, i64 offset)
+    : output_section(osec), thunk_idx(thunk_idx), offset(offset) {}
 
   i64 size() const { return E::thunk_hdr_size + symbols.size() * E::thunk_size; }
   void copy_buf(Context<E> &ctx);
@@ -120,6 +116,7 @@ public:
   static constexpr i64 alignment = 4;
 
   OutputSection<E> &output_section;
+  i64 thunk_idx;
   i64 offset;
   std::mutex mu;
   std::vector<Symbol<E> *> symbols;
@@ -204,20 +201,6 @@ struct FdeRecord {
   FdeRecord(u32 input_offset, u32 rel_idx)
     : input_offset(input_offset), rel_idx(rel_idx) {}
 
-  FdeRecord(const FdeRecord &other)
-    : input_offset(other.input_offset), output_offset(other.output_offset),
-      rel_idx(other.rel_idx), cie_idx(other.cie_idx),
-      is_alive(other.is_alive.load()) {}
-
-  FdeRecord &operator=(const FdeRecord<E> &other) {
-    input_offset = other.input_offset;
-    output_offset = other.output_offset;
-    rel_idx = other.rel_idx;
-    cie_idx = other.cie_idx;
-    is_alive = other.is_alive.load();
-    return *this;
-  }
-
   i64 size(ObjectFile<E> &file) const;
   std::string_view get_contents(ObjectFile<E> &file) const;
   std::span<ElfRel<E>> get_rels(ObjectFile<E> &file) const;
@@ -268,7 +251,7 @@ public:
   bool is_relr_reloc(Context<E> &ctx, const ElfRel<E> &rel) const;
   bool is_killed_by_icf() const;
 
-  void record_undef_error(Context<E> &ctx, const ElfRel<E> &rel);
+  bool record_undef_error(Context<E> &ctx, const ElfRel<E> &rel);
 
   ObjectFile<E> &file;
   OutputSection<E> *output_section = nullptr;
@@ -2845,30 +2828,6 @@ inline bool relax_tlsdesc(Context<E> &ctx, Symbol<E> &sym) {
   if (ctx.arg.is_static)
     return true;
   return ctx.arg.relax && !ctx.arg.shared && !sym.is_imported;
-}
-
-// Returns true if esym has already been resolved.
-template <typename E>
-bool is_resolved(Symbol<E> &sym, const ElfSym<E> &esym) {
-  assert(sym.file);
-
-  // A non-weak undefined symbol must be promoted to an imported
-  // symbol or resolved to an defined symbol. Otherwise, it's an
-  // undefined symbol error.
-  //
-  // Every ELF file has an absolute local symbol as its first symbol.
-  // Referring to that symbol is always valid.
-  bool is_undef = esym.is_undef() && !esym.is_weak() && sym.sym_idx;
-  if (!sym.is_imported && is_undef && sym.esym().is_undef())
-    return false;
-
-  // If a protected/hidden undefined symbol is resolved to other .so,
-  // it's handled as if no symbols were found.
-  if (sym.file->is_dso &&
-      (sym.visibility == STV_PROTECTED || sym.visibility == STV_HIDDEN))
-    return false;
-
-  return true;
 }
 
 } // namespace mold::elf
