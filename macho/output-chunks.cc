@@ -404,13 +404,9 @@ void OutputSection<E>::compute_size(Context<E> &ctx) {
     }
   }
 
-  u64 offset = 0;
-
-  if (this == ctx.data) {
-    // As a special case, we need a word-size padding at the beginning
-    // of __data for dyld. It is located by __dyld_private symbol.
-    offset += 8;
-  }
+  // As a special case, we need a word-size padding at the beginning
+  // of __data for dyld. It is located by __dyld_private symbol.
+  u64 offset = (this == ctx.data) ? 8 : 0;
 
   for (Subsection<E> *subsec : members) {
     offset = align_to(offset, 1 << subsec->p2align);
