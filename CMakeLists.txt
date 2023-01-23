@@ -52,7 +52,7 @@ include(GNUInstallDirs)
 # Build mold itself using mold if -DMOLD_USE_MOLD=ON
 option(MOLD_USE_MOLD "Use mold to build mold" OFF)
 if(MOLD_USE_MOLD)
-  add_link_options(-fuse-ld=mold -Wl,--gdb-index)
+  add_link_options(-fuse-ld=mold)
 endif()
 
 add_executable(mold)
@@ -71,6 +71,10 @@ endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_compile_options(mold PRIVATE -D_GLIBCXX_ASSERTIONS)
+
+  if(NOT APPLE AND NOT WIN32)
+    add_link_options(-Wl,--gdb-index)
+  endif()
 endif()
 
 # Build mold with -flto if -DMOLD_LTO=ON
