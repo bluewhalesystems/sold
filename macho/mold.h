@@ -151,7 +151,6 @@ private:
   void init_subsections(Context<E> &ctx);
   void split_cstring_literals(Context<E> &ctx);
   void split_literal_pointers(Context<E> &ctx);
-  void fix_subsec_members(Context<E> &ctx);
   void parse_data_in_code(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   InputSection<E> *get_common_sec(Context<E> &ctx);

@@ -55,8 +55,10 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
     return;
   }
 
+  if (SymtabCommand *cmd = (SymtabCommand *)find_load_command(ctx, LC_SYMTAB))
+    mach_syms = {(MachSym *)(this->mf->data + cmd->symoff), cmd->nsyms};
+
   parse_sections(ctx);
-  parse_symbols(ctx);
 
   MachHeader &mach_hdr = *(MachHeader *)this->mf->data;
   if (mach_hdr.flags & MH_SUBSECTIONS_VIA_SYMBOLS)
@@ -71,7 +73,7 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
     return a->input_addr < b->input_addr;
   });
 
-  fix_subsec_members(ctx);
+  parse_symbols(ctx);
 
   for (std::unique_ptr<InputSection<E>> &isec : sections)
     if (isec)
@@ -116,44 +118,6 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
       continue;
 
     sections.back().reset(new InputSection<E>(ctx, *this, msec, i));
-  }
-}
-
-template <typename E>
-void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
-  SymtabCommand *cmd = (SymtabCommand *)find_load_command(ctx, LC_SYMTAB);
-  if (!cmd)
-    return;
-
-  mach_syms = {(MachSym *)(this->mf->data + cmd->symoff), cmd->nsyms};
-  this->syms.reserve(mach_syms.size());
-
-  i64 nlocal = 0;
-  for (MachSym &msym : mach_syms)
-    if (!msym.is_extern)
-      nlocal++;
-  local_syms.reserve(nlocal);
-
-  for (i64 i = 0; i < mach_syms.size(); i++) {
-    MachSym &msym = mach_syms[i];
-    std::string_view name = (char *)(this->mf->data + cmd->stroff + msym.stroff);
-
-    if (msym.is_extern) {
-      this->syms.push_back(get_symbol(ctx, name));
-    } else {
-      local_syms.emplace_back(name);
-      Symbol<E> &sym = local_syms.back();
-
-      sym.file = this;
-      sym.subsec = nullptr;
-      sym.scope = SCOPE_LOCAL;
-      sym.is_common = false;
-      sym.is_weak = false;
-      if (msym.type == N_ABS)
-        sym.value = msym.value;
-      sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
-      this->syms.push_back(&sym);
-    }
   }
 }
 
@@ -316,26 +280,50 @@ void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
   }
 }
 
-// Fix local symbols `subsec` members.
 template <typename E>
-void ObjectFile<E>::fix_subsec_members(Context<E> &ctx) {
+void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
+  SymtabCommand *cmd = (SymtabCommand *)find_load_command(ctx, LC_SYMTAB);
+  this->syms.reserve(mach_syms.size());
+
+  i64 nlocal = 0;
+  for (MachSym &msym : mach_syms)
+    if (!msym.is_extern)
+      nlocal++;
+  local_syms.reserve(nlocal);
+
   for (i64 i = 0; i < mach_syms.size(); i++) {
     MachSym &msym = mach_syms[i];
-    Symbol<E> &sym = *this->syms[i];
+    std::string_view name = (char *)(this->mf->data + cmd->stroff + msym.stroff);
 
-    if (!msym.stab && !msym.is_extern && msym.type == N_SECT) {
-      Subsection<E> *subsec = sym_to_subsec[i];
-      if (!subsec)
-        subsec = find_subsection(ctx, msym.sect - 1, msym.value);
+    // Global symbol
+    if (msym.is_extern) {
+      this->syms.push_back(get_symbol(ctx, name));
+      continue;
+    }
 
-      if (subsec) {
-        sym.subsec = subsec;
-        sym.value = msym.value - subsec->input_addr;
-      } else {
-        // Subsec is null if a symbol is in a __compact_unwind.
-        sym.subsec = nullptr;
+    // Local symbol
+    local_syms.emplace_back(name);
+    Symbol<E> &sym = local_syms.back();
+    this->syms.push_back(&sym);
+
+    sym.file = this;
+    sym.scope = SCOPE_LOCAL;
+    sym.is_common = false;
+    sym.is_weak = false;
+    sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
+
+    if (msym.type == N_ABS) {
+      sym.value = msym.value;
+    } else if (!msym.stab && msym.type == N_SECT) {
+      sym.subsec = sym_to_subsec[i];
+      if (!sym.subsec)
+        sym.subsec = find_subsection(ctx, msym.sect - 1, msym.value);
+
+      // Subsec is null if a symbol is in a __compact_unwind.
+      if (sym.subsec)
+        sym.value = msym.value - sym.subsec->input_addr;
+      else
         sym.value = msym.value;
-      }
     }
   }
 }
