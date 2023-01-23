@@ -1112,7 +1112,6 @@ int macho_main(int argc, char **argv) {
         file->is_alive = true;
 
   resolve_symbols(ctx);
-  remove_unreferenced_subsections(ctx);
 
   if (ctx.output_type == MH_EXECUTE && !ctx.arg.entry->file)
     Error(ctx) << "undefined entry point symbol: " << *ctx.arg.entry;
@@ -1139,6 +1138,8 @@ int macho_main(int argc, char **argv) {
 
   if (ctx.arg.dead_strip)
     dead_strip(ctx);
+  else
+    remove_unreferenced_subsections(ctx);
 
   create_synthetic_chunks(ctx);
   merge_mergeable_sections(ctx);

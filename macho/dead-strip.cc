@@ -89,11 +89,6 @@ static void mark(Context<E> &ctx,
                  tbb::concurrent_vector<Subsection<E> *> &rootset) {
   Timer t(ctx, "mark");
 
-  tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
-    for (Subsection<E> *subsec : file->subsections)
-      subsec->is_alive = false;
-  });
-
   tbb::parallel_for_each(rootset, [&](Subsection<E> *subsec) {
     visit(ctx, *subsec);
   });

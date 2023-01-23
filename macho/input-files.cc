@@ -159,6 +159,7 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
         .input_size = (u32)(isec->hdr.addr + isec->hdr.size - addr),
         .input_addr = addr,
         .p2align = (u8)isec->hdr.p2align,
+        .is_alive = !ctx.arg.dead_strip,
       };
       subsec_pool.emplace_back(subsec);
       subsections.push_back(subsec);
@@ -204,6 +205,7 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
         .input_size = (u32)isec->hdr.size,
         .input_addr = (u32)isec->hdr.addr,
         .p2align = (u8)isec->hdr.p2align,
+        .is_alive = !ctx.arg.dead_strip,
       };
       subsec_pool.emplace_back(subsec);
       subsections[i] = subsec;
@@ -246,6 +248,7 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
           .input_size = (u32)(end - pos),
           .input_addr = (u32)(isec->hdr.addr + pos),
           .p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos)),
+          .is_alive = !ctx.arg.dead_strip,
         };
 
         subsec_pool.emplace_back(subsec);
@@ -271,6 +274,7 @@ void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
           .input_size = word_size,
           .input_addr = (u32)(isec->hdr.addr + pos),
           .p2align = (u8)std::countr_zero(word_size),
+          .is_alive = !ctx.arg.dead_strip,
         };
 
         subsec_pool.emplace_back(subsec);
@@ -656,6 +660,7 @@ void ObjectFile<E>::convert_common_symbols(Context<E> &ctx) {
         .isec = *isec,
         .input_size = (u32)msym.value,
         .p2align = (u8)msym.common_p2align,
+        .is_alive = !ctx.arg.dead_strip,
       };
 
       subsections.emplace_back(subsec);
@@ -805,6 +810,7 @@ ObjectFile<E>::add_methname_string(Context<E> &ctx, std::string_view contents) {
     .input_size = (u32)contents.size() + 1,
     .input_addr = (u32)addr,
     .p2align = 0,
+    .is_alive = !ctx.arg.dead_strip,
   };
 
   subsec_pool.emplace_back(subsec);
@@ -851,6 +857,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
     .rel_offset = 0,
     .nrels = 1,
     .p2align = (u8)std::countr_zero(word_size),
+    .is_alive = !ctx.arg.dead_strip,
   };
 
   subsec_pool.emplace_back(subsec);
