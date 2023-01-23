@@ -245,7 +245,7 @@ static std::vector<std::vector<u8>> create_load_commands(Context<E> &ctx) {
   if (ctx.arg.pagezero_size)
     vec.push_back(create_pagezero_cmd(ctx));
 
-  auto append = [&](std::vector<u8> &buf, auto x) {
+  auto append = [&](std::vector<u8> &buf, auto &x) {
     i64 off = buf.size();
     buf.resize(buf.size() + sizeof(x));
     memcpy(buf.data() + off, &x, sizeof(x));
