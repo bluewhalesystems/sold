@@ -254,10 +254,9 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     // New switch
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
+      assert(!r.is_pcrel);
       if (is_tls)
         write(S + A - ctx.tls_begin);
-      else if (r.is_pcrel)
-        write(S + A - P);
       else
         write(S + A);
       break;
@@ -266,7 +265,6 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       write(rels[i].get_addr(ctx) + rels[i].addend - S);
       break;
     case ARM64_RELOC_BRANCH26: {
-      assert(r.is_pcrel);
       i64 val = S + A - P;
       if (val < -(1 << 27) || (1 << 27) <= val)
         val = isec.osec.thunks[r.thunk_idx]->get_addr(r.thunk_sym_idx) - P;
@@ -274,35 +272,26 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       break;
     }
     case ARM64_RELOC_PAGE21:
-      assert(r.is_pcrel);
-      assert(!is_tls);
       *(ul32 *)loc |= page_offset(S + A, P);
       break;
     case ARM64_RELOC_PAGEOFF12:
-      assert(!r.is_pcrel);
       write_ldr(loc, S + A);
       break;
     case ARM64_RELOC_GOT_LOAD_PAGE21:
-      assert(r.is_pcrel);
       *(ul32 *)loc |= page_offset(G + GOT + A, P);
       break;
     case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
-      assert(!r.is_pcrel);
       write_ldr(loc, G + GOT + A);
       break;
     case ARM64_RELOC_POINTER_TO_GOT:
+      assert(r.is_pcrel);
       assert(!is_tls);
-      if (r.is_pcrel)
-        write(G + GOT + A - P);
-      else
-        write(G + GOT + A);
+      write(G + GOT + A - P);
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGE21:
-      assert(r.is_pcrel);
       *(ul32 *)loc |= page_offset(r.sym->get_tlv_addr(ctx) + A, P);
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
-      assert(!r.is_pcrel);
       write_ldr(loc, r.sym->get_tlv_addr(ctx) + A);
       break;
     default:

@@ -102,9 +102,8 @@ static i64 get_reloc_addend(u32 type) {
 static i64 read_addend(u8 *buf, const MachRel &r) {
   if (r.p2size == 2)
     return *(il32 *)(buf + r.offset) + get_reloc_addend(r.type);
-  if (r.p2size == 3)
-    return *(il64 *)(buf + r.offset) + get_reloc_addend(r.type);
-  unreachable();
+  assert(r.p2size == 3);
+  return *(il64 *)(buf + r.offset) + get_reloc_addend(r.type);
 }
 
 template <>
@@ -118,30 +117,26 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 
   for (i64 i = 0; i < hdr.nreloc; i++) {
     MachRel &r = rels[i];
-    i64 addend = read_addend((u8 *)file.mf->data + hdr.offset, r);
-
     vec.push_back({r.offset, (u8)r.type, (u8)r.p2size});
+
     Relocation<E> &rel = vec.back();
+    rel.is_pcrel = r.is_pcrel;
+    rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
 
-    if (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR)
-      rel.is_subtracted = true;
-
-    if (!rel.is_subtracted && rels[i].type != X86_64_RELOC_SUBTRACTOR)
-      rel.is_pcrel = r.is_pcrel;
+    i64 addend = read_addend((u8 *)file.mf->data + hdr.offset, r);
 
     if (r.is_extern) {
       rel.sym = file.syms[r.idx];
       rel.addend = addend;
-      continue;
+    } else {
+      u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend + 4) : addend;
+      Subsection<E> *target = file.find_subsection(ctx, addr);
+      if (!target)
+        Fatal(ctx) << file << ": bad relocation: " << r.offset;
+
+      rel.subsec = target;
+      rel.addend = addr - target->input_addr;
     }
-
-    u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend + 4) : addend;
-    Subsection<E> *target = file.find_subsection(ctx, addr);
-    if (!target)
-      Fatal(ctx) << file << ": bad relocation: " << r.offset;
-
-    rel.subsec = target;
-    rel.addend = addr - target->input_addr;
   }
 
   return vec;
@@ -203,62 +198,40 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 GOT = ctx.got.hdr.addr;
     bool is_tls = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
 
-    auto write = [&](u64 val) {
-      assert(r.p2size == 2 || r.p2size == 3);
-      if (r.p2size == 2)
-        *(ul32 *)loc = val;
-      else
-        *(ul64 *)loc = val;
-    };
-
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
-    case X86_64_RELOC_SIGNED:
+      assert(!r.is_pcrel);
+      assert(r.p2size == 3);
       if (is_tls)
-        write(S + A - ctx.tls_begin);
-      else if (r.is_pcrel)
-        write(S + A - P - 4);
+        *(ul64 *)loc = S + A - ctx.tls_begin;
       else
-        write(S + A);
+        *(ul64 *)loc = S + A;
+      break;
+    case X86_64_RELOC_SIGNED:
+    case X86_64_RELOC_SIGNED_1:
+    case X86_64_RELOC_SIGNED_2:
+    case X86_64_RELOC_SIGNED_4:
+      assert(r.is_pcrel);
+      assert(r.p2size == 2);
+      assert(!is_tls);
+      *(ul32 *)loc = S + A - P - 4 - get_reloc_addend(r.type);
       break;
     case X86_64_RELOC_BRANCH:
       assert(r.is_pcrel);
+      assert(r.p2size == 2);
       assert(!is_tls);
-      write(S + A - P - 4);
+      *(ul32 *)loc = S + A - P - 4;
       break;
     case X86_64_RELOC_GOT_LOAD:
     case X86_64_RELOC_GOT:
-      if (r.is_pcrel)
-        write(G + GOT + A - P - 4);
-      else
-        write(G + GOT + A);
-      break;
-    case X86_64_RELOC_SIGNED_1:
       assert(r.is_pcrel);
-      if (is_tls)
-        write(S + A - ctx.tls_begin - 1);
-      else
-        write(S + A - P - 5);
-      break;
-    case X86_64_RELOC_SIGNED_2:
-      assert(r.is_pcrel);
-      if (is_tls)
-        write(S + A - ctx.tls_begin - 2);
-      else
-        write(S + A - P - 6);
-      break;
-    case X86_64_RELOC_SIGNED_4:
-      assert(r.is_pcrel);
-      if (is_tls)
-        write(S + A - ctx.tls_begin - 4);
-      else
-        write(S + A - P - 8);
+      assert(r.p2size == 2);
+      *(ul32 *)loc = G + GOT + A - P - 4;
       break;
     case X86_64_RELOC_TLV:
-      if (r.is_pcrel)
-        write(r.sym->get_tlv_addr(ctx) + A - P - 4);
-      else
-        write(r.sym->get_tlv_addr(ctx) + A);
+      assert(r.is_pcrel);
+      assert(r.p2size == 2);
+      *(ul32 *)loc = r.sym->get_tlv_addr(ctx) + A - P - 4;
       break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
