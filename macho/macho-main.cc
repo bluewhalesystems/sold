@@ -578,27 +578,27 @@ static void export_symbols(Context<E> &ctx) {
 
   ctx.got.add(ctx, get_symbol(ctx, "dyld_stub_binder"));
 
-  for (ObjectFile<E> *file : ctx.objs) {
-    for (Symbol<E> *sym : file->syms) {
-      if (sym && sym->file == file) {
-        if (sym->flags & NEEDS_GOT)
-          ctx.got.add(ctx, sym);
-        if (sym->flags & NEEDS_THREAD_PTR)
-          ctx.thread_ptrs.add(ctx, sym);
-      }
-    }
-  }
+  std::vector<InputFile<E> *> files;
+  append(files, ctx.objs);
+  append(files, ctx.dylibs);
 
-  for (DylibFile<E> *file : ctx.dylibs) {
-    for (Symbol<E> *sym : file->syms) {
-      if (sym && sym->file == file) {
-        if (sym->flags & NEEDS_STUB)
-          ctx.stubs.add(ctx, sym);
-        if (sym->flags & NEEDS_GOT)
-          ctx.got.add(ctx, sym);
-        if (sym->flags & NEEDS_THREAD_PTR)
-          ctx.thread_ptrs.add(ctx, sym);
-      }
+  std::vector<std::vector<Symbol<E> *>> vec(files.size());
+
+  tbb::parallel_for((i64)0, (i64)files.size(), [&](i64 i) {
+    for (Symbol<E> *sym : files[i]->syms)
+      if (sym && sym->file == files[i] && sym->flags)
+        vec[i].push_back(sym);
+  });
+
+  for (std::span<Symbol<E> *> syms : vec) {
+    for (Symbol<E> *sym : syms) {
+      if (sym->flags & NEEDS_STUB)
+        ctx.stubs.add(ctx, sym);
+      if (sym->flags & NEEDS_GOT)
+        ctx.got.add(ctx, sym);
+      if (sym->flags & NEEDS_THREAD_PTR)
+        ctx.thread_ptrs.add(ctx, sym);
+      sym->flags = 0;
     }
   }
 }
