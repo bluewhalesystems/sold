@@ -1378,7 +1378,15 @@ void DataInCodeSection<E>::compute_size(Context<E> &ctx) {
   assert(contents.empty());
 
   for (ObjectFile<E> *file : ctx.objs) {
-    std::span<DataInCodeEntry> entries = file->data_in_code_entries;
+    LinkEditDataCommand *cmd =
+      (LinkEditDataCommand *)file->find_load_command(ctx, LC_DATA_IN_CODE);
+    if (!cmd)
+      continue;
+
+    std::span<DataInCodeEntry> entries = {
+      (DataInCodeEntry *)(file->mf->data + cmd->dataoff),
+      cmd->datasize / sizeof(DataInCodeEntry),
+    };
 
     for (Subsection<E> *subsec : file->subsections) {
       if (entries.empty())
@@ -1444,6 +1452,10 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
     if (rec.lsda)
       num_lsda++;
   }
+
+  sort(records, [&](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
+    return a.get_func_addr(ctx) < b.get_func_addr(ctx);
+  });
 
   std::vector<std::span<UnwindRecord<E>>> pages = split_records(ctx, records);
 
@@ -1545,11 +1557,6 @@ std::vector<std::span<UnwindRecord<E>>>
 UnwindEncoder<E>::split_records(Context<E> &ctx,
                                 std::span<UnwindRecord<E>> records) {
   constexpr i64 max_group_size = 4096;
-
-  sort(records, [&](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
-    return a.get_func_addr(ctx) < b.get_func_addr(ctx);
-  });
-
   std::vector<std::span<UnwindRecord<E>>> vec;
 
   while (!records.empty()) {

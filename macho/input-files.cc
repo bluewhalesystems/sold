@@ -180,13 +180,15 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
       // as a boundary. We don't want to create an empty subsection if there
       // are two symbols at the same address.
       MachSymOff &m = *it;
-      Subsection<E> &last = *subsections.back();
-      if (!(m.msym->desc & N_ALT_ENTRY) &&
-          isec->hdr.addr <= m.msym->value &&
-          m.msym->value < isec->hdr.addr + isec->hdr.size &&
-          last.input_addr != m.msym->value) {
-        last.input_size = m.msym->value - last.input_addr;
-        add_subsec(m.msym->value);
+
+      if (!(m.msym->desc & N_ALT_ENTRY)) {
+        Subsection<E> &last = *subsections.back();
+        i64 size1 = (i64)m.msym->value - (i64)last.input_addr;
+        i64 size2 = (i64)isec->hdr.addr + (i64)isec->hdr.size - (i64)m.msym->value;
+        if (size1 > 0 && size2 > 0) {
+          last.input_size = size1;
+          add_subsec(m.msym->value);
+        }
       }
       sym_to_subsec[m.symidx] = subsections.back();
     }
@@ -329,16 +331,6 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
       else
         sym.value = msym.value;
     }
-  }
-}
-
-template <typename E>
-void ObjectFile<E>::parse_data_in_code(Context<E> &ctx) {
-  if (auto *cmd = (LinkEditDataCommand *)find_load_command(ctx, LC_DATA_IN_CODE)) {
-    data_in_code_entries = {
-      (DataInCodeEntry *)(this->mf->data + cmd->dataoff),
-      cmd->datasize / sizeof(DataInCodeEntry),
-    };
   }
 }
 

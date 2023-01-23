@@ -114,6 +114,7 @@ public:
   void parse(Context<E> &ctx);
   Subsection<E> *find_subsection(Context<E> &ctx, u32 section_idx, u32 addr);
   std::vector<std::string> get_linker_options(Context<E> &ctx);
+  LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   void parse_compact_unwind(Context<E> &ctx, MachSection &hdr);
   void resolve_symbols(Context<E> &ctx) override;
   bool is_objc_object(Context<E> &ctx);
@@ -131,7 +132,6 @@ public:
   std::span<MachSym> mach_syms;
   std::vector<Symbol<E>> local_syms;
   std::vector<UnwindRecord<E>> unwind_records;
-  std::span<DataInCodeEntry> data_in_code_entries;
   ObjcImageInfo *objc_image_info = nullptr;
   LTOModule *lto_module = nullptr;
 
@@ -148,8 +148,6 @@ private:
   void init_subsections(Context<E> &ctx);
   void split_cstring_literals(Context<E> &ctx);
   void split_literal_pointers(Context<E> &ctx);
-  void parse_data_in_code(Context<E> &ctx);
-  LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   InputSection<E> *get_common_sec(Context<E> &ctx);
   void parse_lto_symbols(Context<E> &ctx);
 
