@@ -13,6 +13,17 @@ static u64 page_offset(u64 hi, u64 lo) {
   return (bits(val, 13, 12) << 29) | (bits(val, 32, 14) << 5);
 }
 
+static void write_ldr(u8 *loc, u32 val) {
+  u32 insn = *(ul32 *)loc;
+  i64 scale = 0;
+  if ((insn & 0x3b000000) == 0x39000000) {
+    scale = bits(insn, 31, 30);
+    if (scale == 0 && (insn & 0x04800000) == 0x04800000)
+      scale = 4;
+  }
+  *(ul32 *)loc |= bits(val, 11, scale) << 10;
+}
+
 template <>
 void StubsSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
@@ -119,25 +130,35 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
 
   MachRel *rels = (MachRel *)(file.mf->data + hdr.reloff);
 
+  // Read one Mach-O relocation at a time and create a Relocation for it
   for (i64 i = 0; i < hdr.nreloc; i++) {
     i64 addend = 0;
 
+    // A SUBTRACTOR relocation is always followed by an UNSIGNED relocation.
+    // They work as a pair. A value is computed by subtracting a SUBTRACTOR
+    // value from a UNSIGNED value, which is then written to the place where
+    // the UNSIGNED reloc points to.
+    //
+    // Mach-O relocation doesn't contain an addend. UNSIGNED and SUBTRACTOR
+    // have addends in the input section they refer to. Users can also
+    // specify an addend for other types of relocations by prepending an
+    // ADDEND reloc.
     switch (rels[i].type) {
     case ARM64_RELOC_UNSIGNED:
     case ARM64_RELOC_SUBTRACTOR:
       switch (rels[i].p2size) {
       case 2:
-        addend = *(il32 *)((u8 *)file.mf->data + hdr.offset + rels[i].offset);
+        addend = *(il32 *)(file.mf->data + hdr.offset + rels[i].offset);
         break;
       case 3:
-        addend = *(il64 *)((u8 *)file.mf->data + hdr.offset + rels[i].offset);
+        addend = *(il64 *)(file.mf->data + hdr.offset + rels[i].offset);
         break;
       default:
-        unreachable();
+        Fatal(ctx) << file << ": relocation with a bad p2size: " << rels[i].offset;
       }
       break;
     case ARM64_RELOC_ADDEND:
-      addend = rels[i++].idx;
+      addend = sign_extend(rels[i++].idx, 23);
       break;
     }
 
@@ -145,26 +166,21 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     vec.push_back({r.offset, (u8)r.type, (u8)r.p2size});
 
     Relocation<E> &rel = vec.back();
-
-    if (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR)
-      rel.is_subtracted = true;
-
-    if (!rel.is_subtracted && rels[i].type != ARM64_RELOC_SUBTRACTOR)
-      rel.is_pcrel = r.is_pcrel;
+    rel.is_pcrel = r.is_pcrel;
+    rel.is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR);
 
     if (r.is_extern) {
       rel.sym = file.syms[r.idx];
       rel.addend = addend;
-      continue;
+    } else {
+      u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend) : addend;
+      Subsection<E> *target = file.find_subsection(ctx, addr);
+      if (!target)
+        Fatal(ctx) << file << ": bad relocation: " << r.offset;
+
+      rel.subsec = target;
+      rel.addend = addr - target->input_addr;
     }
-
-    u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend) : addend;
-    Subsection<E> *target = file.find_subsection(ctx, r.idx - 1, addr);
-    if (!target)
-      Fatal(ctx) << file << ": bad relocation: " << r.offset;
-
-    rel.subsec = target;
-    rel.addend = addr - target->input_addr;
   }
 
   return vec;
@@ -214,98 +230,81 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
   for (i64 i = 0; i < rels.size(); i++) {
     Relocation<E> &r = rels[i];
     u8 *loc = buf + r.offset;
-    i64 val = r.addend;
-    u64 pc = get_addr(ctx) + r.offset;
 
     if (r.sym && !r.sym->file) {
       Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym;
       continue;
     }
 
-    // Compute a relocated value.
-    switch (r.type) {
-    case ARM64_RELOC_UNSIGNED:
-    case ARM64_RELOC_BRANCH26:
-    case ARM64_RELOC_PAGE21:
-    case ARM64_RELOC_PAGEOFF12:
-      val += r.sym ? r.sym->get_addr(ctx) : r.subsec->get_addr(ctx);
-      break;
-    case ARM64_RELOC_SUBTRACTOR: {
-      Relocation<E> s = rels[++i];
-      assert(s.type == ARM64_RELOC_UNSIGNED);
-      u64 val1 = r.sym ? r.sym->get_addr(ctx) : r.subsec->get_addr(ctx);
-      u64 val2 = s.sym ? s.sym->get_addr(ctx) : s.subsec->get_addr(ctx);
-      val += val2 - val1;
-      break;
-    }
-    case ARM64_RELOC_GOT_LOAD_PAGE21:
-    case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
-    case ARM64_RELOC_POINTER_TO_GOT:
-      val += r.sym->get_got_addr(ctx);
-      break;
-    case ARM64_RELOC_TLVP_LOAD_PAGE21:
-    case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
-      val += r.sym->get_tlv_addr(ctx);
-      break;
-    default:
-      Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
-    }
+    u64 S = r.get_addr(ctx);
+    u64 A = r.addend;
+    u64 P = get_addr(ctx) + r.offset;
+    u64 G = r.sym ? r.sym->got_idx * word_size : 0;
+    u64 GOT = ctx.got.hdr.addr;
+    bool is_tls = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
 
-    // An address of a thread-local variable is computed as an offset
-    // to the beginning of the first thread-local section.
-    if (isec.hdr.type == S_THREAD_LOCAL_VARIABLES)
-      val -= ctx.tls_begin;
-
-    // Write a computed value to the output buffer.
-    switch (r.type) {
-    case ARM64_RELOC_UNSIGNED:
-    case ARM64_RELOC_SUBTRACTOR:
-    case ARM64_RELOC_POINTER_TO_GOT:
-      if (r.is_pcrel)
-        val -= pc;
-
+    auto write = [&](u64 val) {
+      assert(r.p2size == 2 || r.p2size == 3);
       if (r.p2size == 2)
         *(ul32 *)loc = val;
-      else if (r.p2size == 3)
-        *(ul64 *)loc = val;
       else
-        unreachable();
+        *(ul64 *)loc = val;
+    };
+
+    // New switch
+    switch (r.type) {
+    case ARM64_RELOC_UNSIGNED:
+      if (is_tls)
+        write(S + A - ctx.tls_begin);
+      else if (r.is_pcrel)
+        write(S + A - P);
+      else
+        write(S + A);
+      break;
+    case ARM64_RELOC_SUBTRACTOR:
+      i++;
+      write(rels[i].get_addr(ctx) + rels[i].addend - S - A);
       break;
     case ARM64_RELOC_BRANCH26: {
       assert(r.is_pcrel);
-      val -= pc;
-
-      i64 lo = -(1 << 27);
-      i64 hi = 1 << 27;
-
-      if (val < lo || hi <= val) {
-        val = isec.osec.thunks[r.thunk_idx]->get_addr(r.thunk_sym_idx) - pc;
-        assert(lo <= val && val < hi);
-      }
-
+      i64 val = S + A - P;
+      if (val < -(1 << 27) || (1 << 27) <= val)
+        val = isec.osec.thunks[r.thunk_idx]->get_addr(r.thunk_sym_idx) - P;
       *(ul32 *)loc |= bits(val, 27, 2);
       break;
     }
     case ARM64_RELOC_PAGE21:
-    case ARM64_RELOC_GOT_LOAD_PAGE21:
-    case ARM64_RELOC_TLVP_LOAD_PAGE21:
       assert(r.is_pcrel);
-      *(ul32 *)loc |= page_offset(val, pc);
+      assert(!is_tls);
+      *(ul32 *)loc |= page_offset(S + A, P);
       break;
     case ARM64_RELOC_PAGEOFF12:
-    case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
-    case ARM64_RELOC_TLVP_LOAD_PAGEOFF12: {
       assert(!r.is_pcrel);
-      u32 insn = *(ul32 *)loc;
-      i64 scale = 0;
-      if ((insn & 0x3b000000) == 0x39000000) {
-        scale = bits(insn, 31, 30);
-        if (scale == 0 && (insn & 0x04800000) == 0x04800000)
-          scale = 4;
-      }
-      *(ul32 *)loc |= bits(val, 11, scale) << 10;
+      write_ldr(loc, S + A);
       break;
-    }
+    case ARM64_RELOC_GOT_LOAD_PAGE21:
+      assert(r.is_pcrel);
+      *(ul32 *)loc |= page_offset(G + GOT + A, P);
+      break;
+    case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
+      assert(!r.is_pcrel);
+      write_ldr(loc, G + GOT + A);
+      break;
+    case ARM64_RELOC_POINTER_TO_GOT:
+      assert(!is_tls);
+      if (r.is_pcrel)
+        write(G + GOT + A - P);
+      else
+        write(G + GOT + A);
+      break;
+    case ARM64_RELOC_TLVP_LOAD_PAGE21:
+      assert(r.is_pcrel);
+      *(ul32 *)loc |= page_offset(r.sym->get_tlv_addr(ctx) + A, P);
+      break;
+    case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
+      assert(!r.is_pcrel);
+      write_ldr(loc, r.sym->get_tlv_addr(ctx) + A);
+      break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
     }

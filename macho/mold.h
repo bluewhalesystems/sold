@@ -32,6 +32,10 @@ template <typename E> struct Symbol;
 
 template <typename E>
 struct Relocation {
+  u64 get_addr(Context<E> &ctx) const {
+    return sym ? sym->get_addr(ctx) : subsec->get_addr(ctx);
+  }
+
   u32 offset = 0;
   u8 type = -1;
   u8 p2size = 0;
@@ -112,7 +116,7 @@ public:
   static ObjectFile *create(Context<E> &ctx, MappedFile<Context<E>> *mf,
                             std::string archive_name);
   void parse(Context<E> &ctx);
-  Subsection<E> *find_subsection(Context<E> &ctx, u32 section_idx, u32 addr);
+  Subsection<E> *find_subsection(Context<E> &ctx, u32 addr);
   std::vector<std::string> get_linker_options(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   void parse_compact_unwind(Context<E> &ctx, MachSection &hdr);

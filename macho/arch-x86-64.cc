@@ -136,7 +136,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
     }
 
     u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend + 4) : addend;
-    Subsection<E> *target = file.find_subsection(ctx, r.idx - 1, addr);
+    Subsection<E> *target = file.find_subsection(ctx, addr);
     if (!target)
       Fatal(ctx) << file << ": bad relocation: " << r.offset;
 
@@ -189,56 +189,80 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
   for (i64 i = 0; i < rels.size(); i++) {
     Relocation<E> &r = rels[i];
-    u64 val = r.addend;
+    u8 *loc = buf + r.offset;
 
     if (r.sym && !r.sym->file) {
       Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym;
       continue;
     }
 
+    u64 S = r.get_addr(ctx);
+    u64 A = r.addend;
+    u64 P = get_addr(ctx) + r.offset;
+    u64 G = r.sym ? r.sym->got_idx * word_size : 0;
+    u64 GOT = ctx.got.hdr.addr;
+    bool is_tls = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
+
+    auto write = [&](u64 val) {
+      assert(r.p2size == 2 || r.p2size == 3);
+      if (r.p2size == 2)
+        *(ul32 *)loc = val;
+      else
+        *(ul64 *)loc = val;
+    };
+
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
     case X86_64_RELOC_SIGNED:
+      if (is_tls)
+        write(S + A - ctx.tls_begin);
+      else if (r.is_pcrel)
+        write(S + A - P - 4);
+      else
+        write(S + A);
+      break;
     case X86_64_RELOC_BRANCH:
-    case X86_64_RELOC_SIGNED_1:
-    case X86_64_RELOC_SIGNED_2:
-    case X86_64_RELOC_SIGNED_4:
-      val += r.sym ? r.sym->get_addr(ctx) : r.subsec->get_addr(ctx);
+      assert(r.is_pcrel);
+      assert(!is_tls);
+      write(S + A - P - 4);
       break;
-    case X86_64_RELOC_SUBTRACTOR: {
-      Relocation<E> s = rels[++i];
-      assert(s.type == X86_64_RELOC_UNSIGNED);
-      assert(r.p2size == s.p2size);
-      u64 val1 = r.sym ? r.sym->get_addr(ctx) : r.subsec->get_addr(ctx);
-      u64 val2 = s.sym ? s.sym->get_addr(ctx) : s.subsec->get_addr(ctx);
-      val += val2 - val1;
-      break;
-    }
-    case X86_64_RELOC_GOT:
     case X86_64_RELOC_GOT_LOAD:
-      val += r.sym->get_got_addr(ctx);
+    case X86_64_RELOC_GOT:
+      if (r.is_pcrel)
+        write(G + GOT + A - P - 4);
+      else
+        write(G + GOT + A);
+      break;
+    case X86_64_RELOC_SIGNED_1:
+      assert(r.is_pcrel);
+      if (is_tls)
+        write(S + A - ctx.tls_begin - 1);
+      else
+        write(S + A - P - 5);
+      break;
+    case X86_64_RELOC_SIGNED_2:
+      assert(r.is_pcrel);
+      if (is_tls)
+        write(S + A - ctx.tls_begin - 2);
+      else
+        write(S + A - P - 6);
+      break;
+    case X86_64_RELOC_SIGNED_4:
+      assert(r.is_pcrel);
+      if (is_tls)
+        write(S + A - ctx.tls_begin - 4);
+      else
+        write(S + A - P - 8);
       break;
     case X86_64_RELOC_TLV:
-      val += r.sym->get_tlv_addr(ctx);
+      if (r.is_pcrel)
+        write(r.sym->get_tlv_addr(ctx) + A - P - 4);
+      else
+        write(r.sym->get_tlv_addr(ctx) + A);
       break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
     }
-
-    if (isec.hdr.type == S_THREAD_LOCAL_VARIABLES) {
-      // An address of a thread-local variable is computed as an offset
-      // to the beginning of the first thread-local section.
-      val -= ctx.tls_begin;
-    } else if (r.is_pcrel) {
-      val -= get_addr(ctx) + r.offset + 4 + get_reloc_addend(r.type);
-    }
-
-    if (r.p2size == 2)
-      *(ul32 *)(buf + r.offset) = val;
-    else if (r.p2size == 3)
-      *(ul64 *)(buf + r.offset) = val;
-    else
-      unreachable();
   }
 }
 

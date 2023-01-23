@@ -323,7 +323,7 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
     } else if (!msym.stab && msym.type == N_SECT) {
       sym.subsec = sym_to_subsec[i];
       if (!sym.subsec)
-        sym.subsec = find_subsection(ctx, msym.sect - 1, msym.value);
+        sym.subsec = find_subsection(ctx, msym.value);
 
       // Subsec is null if a symbol is in a __compact_unwind.
       if (sym.subsec)
@@ -378,7 +378,7 @@ LoadCommand *ObjectFile<E>::find_load_command(Context<E> &ctx, u32 type) {
 
 template <typename E>
 Subsection<E> *
-ObjectFile<E>::find_subsection(Context<E> &ctx, u32 secidx, u32 addr) {
+ObjectFile<E>::find_subsection(Context<E> &ctx, u32 addr) {
   assert(subsections.size() > 0);
 
   auto it = std::partition_point(subsections.begin(), subsections.end(),
@@ -436,7 +436,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
       if (r.is_extern)
         target = sym_to_subsec[r.idx];
       else
-        target = find_subsection(ctx, r.idx - 1, src[idx].code_start);
+        target = find_subsection(ctx, src[idx].code_start);
 
       if (!target)
         error();
@@ -464,7 +464,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
       if (r.is_extern)
         target = sym_to_subsec[r.idx];
       else
-        target = find_subsection(ctx, r.idx - 1, addr);
+        target = find_subsection(ctx, addr);
 
       if (!target)
         error();
