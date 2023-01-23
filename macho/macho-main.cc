@@ -339,8 +339,23 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
     }
   });
 
-  // We synthesize `_objc_msgSend$foo` in the `__objc_stubs` section
-  // if such symbol is missing.
+  // _objc_msgSend is the underlying function of the Objective-C's dynamic
+  // message dispatching. The function takes an receiver object and an
+  // interned method name string as the first and the second arguments,
+  // respectively, along with the arguments for the method.
+  //
+  // Since Xcode 14, Apple's clang no longer directly generate machine
+  // code to call _objc_msgSend but instead generate machine code call to
+  // _objc_msgSend$foo where foo is the receiver's class name. It is now
+  // the linker's responsibility to detect a call to such symbol and
+  // generate stub machine code to call _objc_msgSend with appropriate
+  // arguments.
+  //
+  // The stub code is created in the `__objc_stubs` section.
+  //
+  // Apple did it as a size optimization. Since the code stub is now
+  // shared among functions that call the same class with the same
+  // message, it can reduce the output file size.
   if (!syms.empty()) {
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
 
@@ -1106,6 +1121,8 @@ int macho_main(int argc, char **argv) {
   read_input_files(ctx, file_args);
   parse_object_files(ctx);
 
+  // `-ObjC` is an option to load all members of static archive
+  // libraries that implement an Objective-C class or category.
   if (ctx.arg.ObjC)
     for (ObjectFile<E> *file : ctx.objs)
       if (!file->archive_name.empty() && file->is_objc_object(ctx))

@@ -145,20 +145,16 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     // ADDEND reloc.
     switch (rels[i].type) {
     case ARM64_RELOC_UNSIGNED:
-    case ARM64_RELOC_SUBTRACTOR:
-      switch (rels[i].p2size) {
-      case 2:
+      if (rels[i].p2size == 2)
         addend = *(il32 *)(file.mf->data + hdr.offset + rels[i].offset);
-        break;
-      case 3:
+      else if (rels[i].p2size == 3)
         addend = *(il64 *)(file.mf->data + hdr.offset + rels[i].offset);
-        break;
-      default:
+      else
         Fatal(ctx) << file << ": relocation with a bad p2size: " << rels[i].offset;
-      }
       break;
     case ARM64_RELOC_ADDEND:
-      addend = sign_extend(rels[i++].idx, 23);
+      addend = sign_extend(rels[i].idx, 23);
+      i++;
       break;
     }
 
@@ -198,14 +194,8 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
 
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
-      if (sym->is_imported) {
-        if (r.p2size != 3) {
-          Error(ctx) << this->isec << ": " << r << " relocation at offset 0x"
-                     << std::hex << r.offset << " against symbol `"
-                     << *sym << "' can not be used";
-        }
+      if (sym->is_imported)
         r.needs_dynrel = true;
-      }
       break;
     case ARM64_RELOC_GOT_LOAD_PAGE21:
     case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
@@ -243,26 +233,23 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 GOT = ctx.got.hdr.addr;
     bool is_tls = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
 
-    auto write = [&](u64 val) {
-      assert(r.p2size == 2 || r.p2size == 3);
-      if (r.p2size == 2)
-        *(ul32 *)loc = val;
-      else
-        *(ul64 *)loc = val;
-    };
-
     // New switch
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
-      assert(!r.is_pcrel);
+      ASSERT(!r.is_pcrel);
+      ASSERT(r.p2size == 3);
       if (is_tls)
-        write(S + A - ctx.tls_begin);
+        *(ul64 *)loc = S + A - ctx.tls_begin;
       else
-        write(S + A);
+        *(ul64 *)loc = S + A;
       break;
     case ARM64_RELOC_SUBTRACTOR:
+      ASSERT(r.p2size == 2 || r.p2size == 3);
       i++;
-      write(rels[i].get_addr(ctx) + rels[i].addend - S);
+      if (r.p2size == 2)
+        *(ul32 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
+      else
+        *(ul64 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
       break;
     case ARM64_RELOC_BRANCH26: {
       i64 val = S + A - P;
@@ -284,9 +271,9 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       write_ldr(loc, G + GOT + A);
       break;
     case ARM64_RELOC_POINTER_TO_GOT:
-      assert(r.is_pcrel);
-      assert(!is_tls);
-      write(G + GOT + A - P);
+      ASSERT(r.is_pcrel);
+      ASSERT(r.p2size == 2);
+      *(ul32 *)loc = G + GOT + A - P;
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGE21:
       *(ul32 *)loc |= page_offset(r.sym->get_tlv_addr(ctx) + A, P);

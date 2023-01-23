@@ -101,9 +101,9 @@ static i64 get_reloc_addend(u32 type) {
 
 static i64 read_addend(u8 *buf, const MachRel &r) {
   if (r.p2size == 2)
-    return *(il32 *)(buf + r.offset) + get_reloc_addend(r.type);
+    return *(il32 *)(buf + r.offset);
   assert(r.p2size == 3);
-  return *(il64 *)(buf + r.offset) + get_reloc_addend(r.type);
+  return *(il64 *)(buf + r.offset);
 }
 
 template <>
@@ -121,9 +121,9 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 
     Relocation<E> &rel = vec.back();
     rel.is_pcrel = r.is_pcrel;
-    rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
 
-    i64 addend = read_addend((u8 *)file.mf->data + hdr.offset, r);
+    i64 addend = read_addend(file.mf->data + hdr.offset, r) +
+                 get_reloc_addend(r.type);
 
     if (r.is_extern) {
       rel.sym = file.syms[r.idx];
@@ -154,15 +154,8 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
 
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
-    case X86_64_RELOC_SUBTRACTOR:
-      if (sym->is_imported) {
-        if (r.p2size != 3) {
-          Error(ctx) << this->isec << ": " << r << " relocation at offset 0x"
-                     << std::hex << r.offset << " against symbol `"
-                     << *sym << "' can not be used";
-        }
+      if (sym->is_imported)
         r.needs_dynrel = true;
-      }
       break;
     case X86_64_RELOC_GOT:
     case X86_64_RELOC_GOT_LOAD:
@@ -200,8 +193,8 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
-      assert(!r.is_pcrel);
-      assert(r.p2size == 3);
+      ASSERT(!r.is_pcrel);
+      ASSERT(r.p2size == 3);
       if (is_tls)
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else
@@ -211,26 +204,26 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     case X86_64_RELOC_SIGNED_1:
     case X86_64_RELOC_SIGNED_2:
     case X86_64_RELOC_SIGNED_4:
-      assert(r.is_pcrel);
-      assert(r.p2size == 2);
-      assert(!is_tls);
+      ASSERT(r.is_pcrel);
+      ASSERT(r.p2size == 2);
+      ASSERT(!is_tls);
       *(ul32 *)loc = S + A - P - 4 - get_reloc_addend(r.type);
       break;
     case X86_64_RELOC_BRANCH:
-      assert(r.is_pcrel);
-      assert(r.p2size == 2);
-      assert(!is_tls);
+      ASSERT(r.is_pcrel);
+      ASSERT(r.p2size == 2);
+      ASSERT(!is_tls);
       *(ul32 *)loc = S + A - P - 4;
       break;
     case X86_64_RELOC_GOT_LOAD:
     case X86_64_RELOC_GOT:
-      assert(r.is_pcrel);
-      assert(r.p2size == 2);
+      ASSERT(r.is_pcrel);
+      ASSERT(r.p2size == 2);
       *(ul32 *)loc = G + GOT + A - P - 4;
       break;
     case X86_64_RELOC_TLV:
-      assert(r.is_pcrel);
-      assert(r.p2size == 2);
+      ASSERT(r.is_pcrel);
+      ASSERT(r.p2size == 2);
       *(ul32 *)loc = r.sym->get_tlv_addr(ctx) + A - P - 4;
       break;
     default:
