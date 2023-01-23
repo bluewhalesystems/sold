@@ -396,14 +396,6 @@ ObjectFile<E>::find_subsection(Context<E> &ctx, u32 secidx, u32 addr) {
 }
 
 template <typename E>
-Symbol<E> *ObjectFile<E>::find_symbol(Context<E> &ctx, u32 addr) {
-  for (i64 i = 0; i < mach_syms.size(); i++)
-    if (MachSym &msym = mach_syms[i]; msym.is_extern && msym.value == addr)
-      return this->syms[i];
-  return nullptr;
-}
-
-template <typename E>
 void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
   if (hdr.size % sizeof(CompactUnwindEntry))
     Fatal(ctx) << *this << ": invalid __compact_unwind section size";
@@ -416,6 +408,13 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
   // Read compact unwind entries
   for (i64 i = 0; i < num_entries; i++)
     unwind_records.emplace_back(src[i].code_len, src[i].encoding);
+
+  auto find_symbol = [&](u32 addr) -> Symbol<E> * {
+    for (i64 i = 0; i < mach_syms.size(); i++)
+      if (MachSym &msym = mach_syms[i]; msym.is_extern && msym.value == addr)
+        return this->syms[i];
+    return nullptr;
+  };
 
   // Read relocations
   MachRel *mach_rels = (MachRel *)(this->mf->data + hdr.reloff);
@@ -454,8 +453,8 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
       if (r.is_extern) {
         dst.personality = this->syms[r.idx];
       } else {
-        u32 addr = *(ul32 *)((u8 *)this->mf->data + hdr.offset + r.offset);
-        dst.personality = find_symbol(ctx, addr);
+        u32 addr = *(ul32 *)(this->mf->data + hdr.offset + r.offset);
+        dst.personality = find_symbol(addr);
       }
 
       if (!dst.personality)
@@ -630,11 +629,9 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
 
     Symbol<E> &sym = *this->syms[i];
     std::scoped_lock lock(sym.mu);
-    if (!sym.file)
-      continue;
 
-    if (msym.is_undef() || (msym.is_common() && !sym.is_common))
-      if (InputFile<E> *file = sym.file)
+    if (InputFile<E> *file = sym.file)
+      if (msym.is_undef() || (msym.is_common() && !sym.is_common))
         if (!file->is_alive.test_and_set() && !file->is_dylib)
           feeder((ObjectFile<E> *)file);
   }
@@ -921,10 +918,10 @@ find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
 
   if (path.starts_with("@rpath/")) {
     for (std::string_view rpath : parent.rpaths) {
-      std::string path2 = path_clean(std::string(rpath) + "/" + path.substr(6));
-      if (path2.starts_with("@loader_path/"))
-        path2 = path_clean(std::string(parent.mf->name) + "/../" + path2.substr(13));
-      if (MappedFile<Context<E>> *ret = find(path2))
+      std::string p = path_clean(std::string(rpath) + "/" + path.substr(6));
+      if (p.starts_with("@loader_path/"))
+        p = path_clean(std::string(parent.mf->name) + "/../" + p.substr(13));
+      if (MappedFile<Context<E>> *ret = find(p))
         return ret;
     }
     return nullptr;
@@ -963,17 +960,12 @@ void DylibFile<E>::parse(Context<E> &ctx) {
   }
 
   // Initialize syms and is_weak_symbols vectors
-  for (std::string_view s : exports) {
+  for (std::string_view s : exports)
     this->syms.push_back(get_symbol(ctx, s));
-    is_weak_symbol.push_back(false);
-  }
 
-  for (std::string_view s : weak_exports) {
-    if (!exports.contains(s)) {
+  for (std::string_view s : weak_exports)
+    if (!exports.contains(s))
       this->syms.push_back(get_symbol(ctx, s));
-      is_weak_symbol.push_back(true);
-    }
-  }
 }
 
 template <typename E>
@@ -1085,7 +1077,7 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
       sym.file = this;
       sym.scope = SCOPE_LOCAL;
       sym.is_imported = true;
-      sym.is_weak = (this->is_weak || is_weak_symbol[i]);
+      sym.is_weak = (this->is_weak || exports.size() <= i);
       sym.no_dead_strip = false;
       sym.subsec = nullptr;
       sym.value = 0;
