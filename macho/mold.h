@@ -364,9 +364,13 @@ public:
   virtual void compute_size(Context<E> &ctx) {}
   virtual void copy_buf(Context<E> &ctx) {}
 
+  OutputSection<E> *to_osec() const;
+
   MachSection hdr = {};
   u32 sect_idx = 0;
   bool is_hidden = false;
+
+protected:
   bool is_output_section = false;
 };
 
@@ -1091,6 +1095,13 @@ inline std::ostream &operator<<(std::ostream &out, const Symbol<E> &sym) {
 
 inline u64 RangeExtensionThunk<ARM64>::get_addr(i64 idx) const {
   return output_section.hdr.addr + offset + idx * ENTRY_SIZE;
+}
+
+template <typename E>
+OutputSection<E> *Chunk<E>::to_osec() const {
+  if (is_output_section)
+    return (OutputSection<E> *)this;
+  return nullptr;
 }
 
 } // namespace mold::macho

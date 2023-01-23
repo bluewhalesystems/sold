@@ -371,9 +371,9 @@ OutputSection<E>::get_instance(Context<E> &ctx, std::string_view segname,
   auto find = [&]() -> OutputSection<E> * {
     for (Chunk<E> *chunk : ctx.chunks) {
       if (chunk->hdr.match(segname, sectname)) {
-        if (!chunk->is_output_section)
-          Fatal(ctx) << "reserved name is used: " << segname << "," << sectname;
-        return (OutputSection<E> *)chunk;
+        if (OutputSection<E> *osec = chunk->to_osec())
+          return osec;
+        Fatal(ctx) << "reserved name is used: " << segname << "," << sectname;
       }
     }
     return nullptr;
@@ -673,8 +673,8 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
     for (Chunk<E> *chunk : seg->chunks)
-      if (chunk->is_output_section)
-        for (Subsection<E> *subsec : ((OutputSection<E> *)chunk)->members)
+      if (OutputSection<E> *osec = chunk->to_osec())
+        for (Subsection<E> *subsec : osec->members)
           for (Relocation<E> &rel : subsec->get_rels())
             if (!rel.is_pcrel && !rel.is_subtracted && rel.type == E::abs_rel &&
                 !refers_tls(rel.sym))
@@ -769,8 +769,8 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
     for (Chunk<E> *chunk : seg->chunks)
-      if (chunk->is_output_section)
-        for (Subsection<E> *subsec : ((OutputSection<E> *)chunk)->members)
+      if (OutputSection<E> *osec = chunk->to_osec())
+        for (Subsection<E> *subsec : osec->members)
           for (Relocation<E> &r : subsec->get_rels())
             if (r.needs_dynrel)
               enc.add(*r.sym, seg->seg_idx,
@@ -1574,8 +1574,8 @@ static std::vector<u8> construct_unwind_info(Context<E> &ctx) {
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
     for (Chunk<E> *chunk : seg->chunks)
-      if (chunk->is_output_section)
-        for (Subsection<E> *subsec : ((OutputSection<E> *)chunk)->members)
+      if (OutputSection<E> *osec = chunk->to_osec())
+        for (Subsection<E> *subsec : osec->members)
           for (UnwindRecord<E> &rec : subsec->get_unwind_records())
             records.push_back(rec);
 

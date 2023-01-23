@@ -392,9 +392,10 @@ static void create_synthetic_chunks(Context<E> &ctx) {
 
   // Add output sections to segments.
   for (Chunk<E> *chunk : ctx.chunks) {
-    if (chunk != ctx.data && chunk->is_output_section &&
-        ((OutputSection<E> *)chunk)->members.empty())
-      continue;
+    if (chunk != ctx.data)
+      if (OutputSection<E> *osec = chunk->to_osec())
+        if (osec->members.empty())
+          continue;
 
     OutputSegment<E> *seg =
       OutputSegment<E>::get_instance(ctx, chunk->hdr.get_segname());
@@ -522,13 +523,13 @@ static void merge_mergeable_sections(Context<E> &ctx) {
   Timer t(ctx, "merge_mergeable_sections");
 
   for (Chunk<E> *chunk : ctx.chunks) {
-    if (chunk->is_output_section) {
+    if (OutputSection<E> *osec = chunk->to_osec()) {
       switch (chunk->hdr.type) {
       case S_CSTRING_LITERALS:
-        uniquify_cstrings(ctx, *(OutputSection<E> *)chunk);
+        uniquify_cstrings(ctx, *osec);
         break;
       case S_LITERAL_POINTERS:
-        uniquify_literal_pointers(ctx, *(OutputSection<E> *)chunk);
+        uniquify_literal_pointers(ctx, *osec);
         break;
       }
     }
