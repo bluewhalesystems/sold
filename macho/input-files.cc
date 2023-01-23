@@ -520,13 +520,15 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
 // Ties are broken by file priority.
 template <typename E>
 static u64 get_rank(InputFile<E> *file, bool is_common, bool is_weak) {
+  bool is_in_archive = !file->is_alive;
+
   auto get_sym_rank = [&] {
     if (is_common) {
       assert(!file->is_dylib);
-      return !file->is_alive ? 6 : 5;
+      return is_in_archive? 6 : 5;
     }
 
-    if (file->is_dylib || !file->is_alive)
+    if (file->is_dylib || is_in_archive)
       return is_weak ? 4 : 3;
     return is_weak ? 2 : 1;
   };
@@ -759,6 +761,8 @@ std::string_view ObjectFile<E>::get_linker_optimization_hints(Context<E> &ctx) {
 
 template <typename E>
 void ObjectFile<E>::add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym) {
+  assert(this == ctx.internal_obj);
+
   std::string_view prefix = "_objc_msgSend$";
   assert(sym.name.starts_with(prefix));
 
@@ -859,7 +863,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
 
 template <typename E>
 DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
-  : InputFile<E>(mf) {
+    : InputFile<E>(mf) {
   this->is_dylib = true;
   this->is_alive = (ctx.needed_l || !ctx.arg.dead_strip_dylibs);
   this->is_weak = ctx.weak_l;
@@ -896,9 +900,10 @@ find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
           return file;
       }
 
-      for (std::string extn : {".tbd", ".dylib"})
-        if (auto *file = MappedFile<Context<E>>::open(ctx, root + path + extn))
-          return file;
+      if (auto *file = MappedFile<Context<E>>::open(ctx, root + path + ".tbd"))
+        return file;
+      if (auto *file = MappedFile<Context<E>>::open(ctx, root + path + ".dylib"))
+        return file;
     }
 
     return nullptr;
@@ -918,7 +923,7 @@ find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
     for (std::string_view rpath : parent.rpaths) {
       std::string path2 = path_clean(std::string(rpath) + "/" + path.substr(6));
       if (path2.starts_with("@loader_path/"))
-        path2 = path_clean(std::string(parent.mf->name) + "/../" + path2);
+        path2 = path_clean(std::string(parent.mf->name) + "/../" + path2.substr(13));
       if (MappedFile<Context<E>> *ret = find(path2))
         return ret;
     }
