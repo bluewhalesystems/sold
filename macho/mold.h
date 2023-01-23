@@ -19,8 +19,6 @@
 
 namespace mold::macho {
 
-static constexpr i64 COMMON_PAGE_SIZE = 0x4000;
-
 template <typename E> class Chunk;
 template <typename E> class InputSection;
 template <typename E> class OutputSection;

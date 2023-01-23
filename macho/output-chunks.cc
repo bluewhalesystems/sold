@@ -539,8 +539,8 @@ void OutputSegment<E>::set_offset_regular(Context<E> &ctx, i64 fileoff,
     vmaddr += sec.hdr.size;
   }
 
-  cmd.vmsize = align_to(vmaddr - cmd.vmaddr, COMMON_PAGE_SIZE);
-  cmd.filesize = align_to(fileoff - cmd.fileoff, COMMON_PAGE_SIZE);
+  cmd.vmsize = align_to(vmaddr - cmd.vmaddr, E::page_size);
+  cmd.filesize = align_to(fileoff - cmd.fileoff, E::page_size);
 }
 
 template <typename E>
@@ -577,7 +577,7 @@ void OutputSegment<E>::set_offset_linkedit(Context<E> &ctx, i64 fileoff,
     vmaddr += chunk->hdr.size;
   }
 
-  cmd.vmsize = align_to(vmaddr - cmd.vmaddr, COMMON_PAGE_SIZE);
+  cmd.vmsize = align_to(vmaddr - cmd.vmaddr, E::page_size);
   cmd.filesize = fileoff - cmd.fileoff;
 }
 
