@@ -263,7 +263,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       break;
     case ARM64_RELOC_SUBTRACTOR:
       i++;
-      write(rels[i].get_addr(ctx) + rels[i].addend - S - A);
+      write(rels[i].get_addr(ctx) + rels[i].addend - S);
       break;
     case ARM64_RELOC_BRANCH26: {
       assert(r.is_pcrel);
