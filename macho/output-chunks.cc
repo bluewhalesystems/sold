@@ -1210,11 +1210,6 @@ void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
     *buf++ = sym->output_symtab_idx;
 }
 
-template <typename E>
-static bool has_objc_image_info_section(Context<E> &ctx) {
-  return false;
-}
-
 // Create __DATA,__objc_imageinfo section contents by merging input
 // __objc_imageinfo sections.
 template <typename E>
