@@ -1007,6 +1007,7 @@ void DylibFile<E>::read_trie(Context<E> &ctx, u8 *start, i64 offset,
     std::string suffix((char *)buf);
     buf += suffix.size() + 1;
     i64 off = read_uleb(buf);
+    assert(off != offset);
     read_trie(ctx, start, off, prefix + suffix);
   }
 }
@@ -1041,7 +1042,7 @@ void DylibFile<E>::parse_dylib(Context<E> &ctx) {
     }
     case LC_DYLD_INFO_ONLY: {
       DyldInfoCommand &cmd = *(DyldInfoCommand *)p;
-      if (cmd.export_off)
+      if (cmd.export_off && cmd.export_size)
         read_trie(ctx, this->mf->data + cmd.export_off, 0, "");
       break;
     }

@@ -39,17 +39,25 @@ static std::vector<u8> create_dyld_info_only_cmd(Context<E> &ctx) {
   cmd.cmd = LC_DYLD_INFO_ONLY;
   cmd.cmdsize = buf.size();
 
-  cmd.rebase_off = ctx.rebase.hdr.offset;
-  cmd.rebase_size = ctx.rebase.hdr.size;
+  if (ctx.rebase.hdr.size) {
+    cmd.rebase_off = ctx.rebase.hdr.offset;
+    cmd.rebase_size = ctx.rebase.hdr.size;
+  }
 
-  cmd.bind_off = ctx.bind.hdr.offset;
-  cmd.bind_size = ctx.bind.hdr.size;
+  if (ctx.bind.hdr.size) {
+    cmd.bind_off = ctx.bind.hdr.offset;
+    cmd.bind_size = ctx.bind.hdr.size;
+  }
 
-  cmd.lazy_bind_off = ctx.lazy_bind.hdr.offset;
-  cmd.lazy_bind_size = ctx.lazy_bind.hdr.size;
+  if (ctx.lazy_bind.hdr.size) {
+    cmd.lazy_bind_off = ctx.lazy_bind.hdr.offset;
+    cmd.lazy_bind_size = ctx.lazy_bind.hdr.size;
+  }
 
-  cmd.export_off = ctx.export_.hdr.offset;
-  cmd.export_size = ctx.export_.hdr.size;
+  if (ctx.export_.hdr.size) {
+    cmd.export_off = ctx.export_.hdr.offset;
+    cmd.export_size = ctx.export_.hdr.size;
+  }
   return buf;
 }
 
