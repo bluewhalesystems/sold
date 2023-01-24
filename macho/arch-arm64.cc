@@ -24,6 +24,17 @@ static void write_ldr(u8 *loc, u32 val) {
   *(ul32 *)loc |= bits(val, 11, scale) << 10;
 }
 
+// Lazy function symbol resolution is done in Mach-O in the same way as
+// ELF but with slightly different file layout.
+//
+// __stubs section contains PLT entries. It reads a function address
+// from __la_symbol_ptr section and jump there.
+//
+// __la_symbol_ptr entries are initialized to point to entries in
+// __stubs_helper section. If a PLT entry is called for the first time,
+// the control is transferred to its corresponding entry in
+// __la_symbol_ptr. It then calls dyld_stub_binder with appropriate
+// arguments for symbol resolution.
 template <>
 void StubsSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
@@ -47,6 +58,8 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
   }
 }
 
+// __stubs_helper contains code to call the dynamic symbol resolver for
+// PLT.
 template <>
 void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *start = (ul32 *)(ctx.buf + this->hdr.offset);
@@ -90,6 +103,9 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
   }
 }
 
+// For each _objc_msgSend$<classname>, we create an entry in _objc_stubs
+// section. Each entry consist of machine code that calls _objc_msgSend
+// with the address to an interned class name as an argument.
 template <>
 void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
   if (this->hdr.size == 0)
@@ -134,15 +150,10 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
   for (i64 i = 0; i < hdr.nreloc; i++) {
     i64 addend = 0;
 
-    // A SUBTRACTOR relocation is always followed by an UNSIGNED relocation.
-    // They work as a pair. A value is computed by subtracting a SUBTRACTOR
-    // value from a UNSIGNED value, which is then written to the place where
-    // the UNSIGNED reloc points to.
-    //
-    // Mach-O relocation doesn't contain an addend. UNSIGNED and SUBTRACTOR
-    // have addends in the input section they refer to. Users can also
-    // specify an addend for other types of relocations by prepending an
-    // ADDEND reloc.
+    // Mach-O relocation doesn't contain an addend. UNSIGNED relocs have
+    // addends in the input section they refer to. Users can also specify
+    // an addend for other types of relocations by prepending an ADDEND
+    // reloc.
     switch (rels[i].type) {
     case ARM64_RELOC_UNSIGNED:
       if (rels[i].p2size == 2)
@@ -243,8 +254,12 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
         *(ul64 *)loc = S + A;
       break;
     case ARM64_RELOC_SUBTRACTOR:
+      // A SUBTRACTOR relocation is always followed by an UNSIGNED relocation.
+      // They work as a pair to materialize a relative address between two
+      // locations.
       ASSERT(r.size == 4 || r.size == 8);
       i++;
+      ASSERT(rels[i].type == ARM64_RELOC_UNSIGNED);
       if (r.size == 4)
         *(ul32 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
       else

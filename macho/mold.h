@@ -30,6 +30,9 @@ template <typename E> struct Symbol;
 // input-files.cc
 //
 
+// We read Mach-O-native relocations from input files and translate
+// them to mold's representation of relocations and then attach them
+// to subsections.
 template <typename E>
 struct Relocation {
   u64 get_addr(Context<E> &ctx) const {
@@ -57,6 +60,9 @@ std::ostream &operator<<(std::ostream &out, const Relocation<E> &rel) {
   return out;
 }
 
+// UnwindRecord represent a record describing how to handle exceptions.
+// At runtime, the exception handler searches an unwinding record by
+// instruction pointer.
 template <typename E>
 struct UnwindRecord {
   UnwindRecord(u32 len, u32 enc) : code_len(len), encoding(enc) {}
@@ -199,6 +205,10 @@ std::ostream &operator<<(std::ostream &out, const InputFile<E> &file);
 // input-sections.cc
 //
 
+// InputSection represents an input section in an input file. InputSection
+// is always split into one or more Subsections. If an input section is not
+// splittable, we still create a subsection and let it cover the entire input
+// section.
 template <typename E>
 class InputSection {
 public:
@@ -218,6 +228,7 @@ public:
 template <typename E>
 std::ostream &operator<<(std::ostream &out, const InputSection<E> &sec);
 
+// Subsection represents a region in an InputSection.
 template <typename E>
 class Subsection {
 public:
