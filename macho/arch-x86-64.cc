@@ -121,6 +121,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 
     Relocation<E> &rel = vec.back();
     rel.is_pcrel = r.is_pcrel;
+    rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
 
     i64 addend = read_addend(file.mf->data + hdr.offset, r) +
                  get_reloc_addend(r.type);
@@ -198,6 +199,12 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else
         *(ul64 *)loc = S + A;
+      break;
+    case X86_64_RELOC_SUBTRACTOR:
+      ASSERT(r.size == 4);
+      i++;
+      ASSERT(rels[i].type == X86_64_RELOC_UNSIGNED);
+      *(ul32 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
       break;
     case X86_64_RELOC_SIGNED:
     case X86_64_RELOC_SIGNED_1:
