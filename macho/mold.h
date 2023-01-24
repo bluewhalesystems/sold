@@ -194,7 +194,7 @@ public:
   bool is_reexported = false;
 
   std::vector<std::string_view> reexported_libs;
-  std::vector<std::string_view> rpaths;
+  std::vector<std::string> rpaths;
   std::set<std::string_view> exports;
   std::set<std::string_view> weak_exports;
 

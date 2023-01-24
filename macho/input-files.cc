@@ -876,7 +876,7 @@ DylibFile<E> *DylibFile<E>::create(Context<E> &ctx, MappedFile<Context<E>> *mf) 
 
 template <typename E>
 static MappedFile<Context<E>> *
-find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
+find_external_lib(Context<E> &ctx, DylibFile<E> &loader, std::string path) {
   auto find = [&](std::string path) -> MappedFile<Context<E>> * {
     if (!path.starts_with('/'))
       return MappedFile<Context<E>>::open(ctx, path);
@@ -911,15 +911,13 @@ find_external_lib(Context<E> &ctx, DylibFile<E> &parent, std::string path) {
   }
 
   if (path.starts_with("@loader_path/")) {
-    path = path_clean(std::string(parent.mf->name) + "/../" + path.substr(13));
+    path = path_clean(std::string(loader.mf->name) + "/../" + path.substr(13));
     return find(path);
   }
 
   if (path.starts_with("@rpath/")) {
-    for (std::string_view rpath : parent.rpaths) {
+    for (std::string_view rpath : loader.rpaths) {
       std::string p = path_clean(std::string(rpath) + "/" + path.substr(6));
-      if (p.starts_with("@loader_path/"))
-        p = path_clean(std::string(parent.mf->name) + "/../" + p.substr(13));
       if (MappedFile<Context<E>> *ret = find(p))
         return ret;
     }
@@ -1059,7 +1057,10 @@ void DylibFile<E>::parse_dylib(Context<E> &ctx) {
       break;
     case LC_RPATH: {
       RpathCommand &cmd = *(RpathCommand *)p;
-      rpaths.push_back((char *)p + cmd.path_off);
+      std::string rpath = (char *)p + cmd.path_off;
+      if (rpath.starts_with("@loader_path/"))
+        rpath = std::string(this->mf->name) + "/../" + rpath.substr(13);
+      rpaths.push_back(rpath);
       break;
     }
     }
