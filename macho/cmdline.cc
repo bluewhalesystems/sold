@@ -314,6 +314,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.add_empty_section.push_back({arg, arg2});
     } else if (read_flag("-adhoc_codesign")) {
       ctx.arg.adhoc_codesign = true;
+    } else if (read_flag("--no-call-graph-profile-sort")) {
     } else if (read_flag("-no_adhoc_codesign")) {
       ctx.arg.adhoc_codesign = false;
     } else if (read_flag("-all_load")) {
