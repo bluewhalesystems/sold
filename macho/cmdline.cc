@@ -314,7 +314,6 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.add_empty_section.push_back({arg, arg2});
     } else if (read_flag("-adhoc_codesign")) {
       ctx.arg.adhoc_codesign = true;
-    } else if (read_flag("--no-call-graph-profile-sort")) {
     } else if (read_flag("-no_adhoc_codesign")) {
       ctx.arg.adhoc_codesign = false;
     } else if (read_flag("-all_load")) {
@@ -493,6 +492,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_joined("-weak-l")) {
       remaining.push_back("-weak-l");
       remaining.push_back(std::string(arg));
+    } else if (read_flag("--no-call-graph-profile-sort")) {
+    } else if (read_flag("--icf=none")) {
     } else {
       if (args[i][0] == '-')
         Fatal(ctx) << "unknown command line option: " << args[i];
