@@ -366,11 +366,10 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
     for (Symbol<E> *sym : syms)
       ctx.internal_obj->add_msgsend_symbol(ctx, *sym);
 
-    Symbol<E> *sym = get_symbol(ctx, "_objc_msgSend");
-    if (!sym->file)
+    if (!ctx._objc_msgSend->file)
       Error(ctx) << "undefined symbol: _objc_msgSend";
-    if (sym->is_imported)
-      sym->flags |= NEEDS_GOT;
+    if (ctx._objc_msgSend->is_imported)
+      ctx._objc_msgSend->flags |= NEEDS_GOT;
   }
 }
 

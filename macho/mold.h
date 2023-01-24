@@ -891,6 +891,7 @@ struct Context {
 
     bss->hdr.type = S_ZEROFILL;
     common->hdr.type = S_ZEROFILL;
+    _objc_msgSend = get_symbol(*this, "_objc_msgSend");
   }
 
   Context(const Context<E> &) = delete;
@@ -1031,6 +1032,8 @@ struct Context {
   OutputSection<E> *data = nullptr;
   OutputSection<E> *bss = nullptr;
   OutputSection<E> *common = nullptr;
+
+  Symbol<E> *_objc_msgSend = nullptr;
 };
 
 template <typename E>

@@ -107,7 +107,7 @@ void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
   };
   static_assert(sizeof(insn) == ENTRY_SIZE);
 
-  u64 msgsend_got_addr = get_symbol(ctx, "_objc_msgSend")->get_got_addr(ctx);
+  u64 msgsend_got_addr = ctx._objc_msgSend->get_got_addr(ctx);
 
   for (i64 i = 0; i < methnames.size(); i++) {
     ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset + ENTRY_SIZE * i);
