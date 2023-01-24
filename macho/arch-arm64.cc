@@ -242,13 +242,17 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 P = get_addr(ctx) + r.offset;
     u64 G = r.sym ? r.sym->got_idx * word_size : 0;
     u64 GOT = ctx.got.hdr.addr;
-    bool is_tlv = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
 
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
       ASSERT(!r.is_pcrel);
       ASSERT(r.size == 8);
-      if (is_tlv)
+      if (r.needs_dynrel)
+        break;
+
+      // __thread_vars contains TP-relative addresses to symbols in the
+      // TLS initialization image (i.e. __thread_data and __thread_bss).
+      if (r.refers_tls())
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else
         *(ul64 *)loc = S + A;
