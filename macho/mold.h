@@ -38,7 +38,7 @@ struct Relocation {
 
   u32 offset = 0;
   u8 type = -1;
-  u8 p2size = 0;
+  u8 size = 0;
   bool is_pcrel : 1 = false;
   bool is_subtracted : 1 = false;
   bool needs_dynrel : 1 = false;

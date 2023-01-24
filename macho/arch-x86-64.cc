@@ -117,7 +117,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 
   for (i64 i = 0; i < hdr.nreloc; i++) {
     MachRel &r = rels[i];
-    vec.push_back({r.offset, (u8)r.type, (u8)r.p2size});
+    vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
     rel.is_pcrel = r.is_pcrel;
@@ -189,13 +189,13 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 P = get_addr(ctx) + r.offset;
     u64 G = r.sym ? r.sym->got_idx * word_size : 0;
     u64 GOT = ctx.got.hdr.addr;
-    bool is_tls = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
+    bool is_tlv = (isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
 
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
       ASSERT(!r.is_pcrel);
-      ASSERT(r.p2size == 3);
-      if (is_tls)
+      ASSERT(r.size == 8);
+      if (is_tlv)
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else
         *(ul64 *)loc = S + A;
@@ -205,25 +205,25 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     case X86_64_RELOC_SIGNED_2:
     case X86_64_RELOC_SIGNED_4:
       ASSERT(r.is_pcrel);
-      ASSERT(r.p2size == 2);
-      ASSERT(!is_tls);
+      ASSERT(r.size == 4);
+      ASSERT(!is_tlv);
       *(ul32 *)loc = S + A - P - 4 - get_reloc_addend(r.type);
       break;
     case X86_64_RELOC_BRANCH:
       ASSERT(r.is_pcrel);
-      ASSERT(r.p2size == 2);
-      ASSERT(!is_tls);
+      ASSERT(r.size == 4);
+      ASSERT(!is_tlv);
       *(ul32 *)loc = S + A - P - 4;
       break;
     case X86_64_RELOC_GOT_LOAD:
     case X86_64_RELOC_GOT:
       ASSERT(r.is_pcrel);
-      ASSERT(r.p2size == 2);
+      ASSERT(r.size == 4);
       *(ul32 *)loc = G + GOT + A - P - 4;
       break;
     case X86_64_RELOC_TLV:
       ASSERT(r.is_pcrel);
-      ASSERT(r.p2size == 2);
+      ASSERT(r.size == 4);
       *(ul32 *)loc = r.sym->get_tlv_addr(ctx) + A - P - 4;
       break;
     default:

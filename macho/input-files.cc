@@ -836,7 +836,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
   isec->rels.push_back(Relocation<E>{
     .offset = 0,
     .type = E::abs_rel,
-    .p2size = (u8)std::countr_zero(word_size),
+    .size = (u8)word_size,
     .subsec = &methname,
   });
 
