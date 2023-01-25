@@ -644,6 +644,12 @@ struct DataInCodeEntry {
   ul16 kind;
 };
 
+struct UmbrellaCommand {
+  ul32 cmd;
+  ul32 cmdsize;
+  ul32 umbrella_off;
+};
+
 struct LinkerOptionCommand {
   ul32 cmd;
   ul32 cmdsize;

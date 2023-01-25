@@ -222,6 +222,19 @@ static std::vector<u8> create_data_in_code_cmd(Context<E> &ctx) {
 }
 
 template <typename E>
+static std::vector<u8> create_sub_framework_cmd(Context<E> &ctx) {
+  i64 size = sizeof(UmbrellaCommand) + ctx.arg.umbrella.size() + 1;
+  std::vector<u8> buf(align_to(size, 8));
+  UmbrellaCommand &cmd = *(UmbrellaCommand *)buf.data();
+
+  cmd.cmd = LC_SUB_FRAMEWORK;
+  cmd.cmdsize = buf.size();
+  cmd.umbrella_off = sizeof(cmd);
+  write_string(buf.data() + sizeof(cmd), ctx.arg.umbrella);
+  return buf;
+}
+
+template <typename E>
 static std::vector<u8> create_id_dylib_cmd(Context<E> &ctx) {
   std::vector<u8> buf(sizeof(DylibCommand) +
                       align_to(ctx.arg.final_output.size() + 1, 8));
@@ -300,6 +313,9 @@ static std::vector<std::vector<u8>> create_load_commands(Context<E> &ctx) {
 
   if (!ctx.data_in_code.contents.empty())
     vec.push_back(create_data_in_code_cmd(ctx));
+
+  if (!ctx.arg.umbrella.empty())
+    vec.push_back(create_sub_framework_cmd(ctx));
 
   switch (ctx.output_type) {
   case MH_EXECUTE:

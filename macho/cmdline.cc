@@ -102,6 +102,7 @@ Options:
   -t                          Print out each file the linker loads
   -thread_count <NUMBER>      Use given number of threads
   -u <SYMBOL>                 Force load a given symbol from archive if necessary
+  -umbrella <FRAMEWORK_NAME>  Specify an umbrella framework name
   -unexported_symbol <SYMBOL> Export all but a given symbol
   -unexported_symbols_list <FILE>
                               Read a list of unexported symbols from a given file
@@ -475,6 +476,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.thread_count = std::stoi(std::string(arg));
     } else if (read_arg("-u")) {
       ctx.arg.u.push_back(std::string(arg));
+    } else if (read_arg("-umbrella")) {
+      ctx.arg.umbrella = arg;
     } else if (read_arg("-unexported_symbol")) {
       if (!ctx.arg.unexported_symbols_list.add(arg, 1))
         Fatal(ctx) << "-unexported_symbol: invalid glob pattern: " << arg;
