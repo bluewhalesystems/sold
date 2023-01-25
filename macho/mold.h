@@ -978,7 +978,7 @@ struct Context {
     std::vector<std::string> library_paths;
     std::vector<std::string> mllvm;
     std::vector<std::string> order_file;
-    std::vector<std::string> rpath;
+    std::vector<std::string> rpaths;
     std::vector<std::string> syslibroot;
     std::vector<std::string> u;
   } arg;

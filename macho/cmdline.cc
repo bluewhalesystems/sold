@@ -449,7 +449,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       remaining.push_back("-reexport_library");
       remaining.push_back(std::string(arg));
     } else if (read_arg("-rpath")) {
-      ctx.arg.rpath.push_back(std::string(arg));
+      ctx.arg.rpaths.push_back(std::string(arg));
     } else if (read_flag("-search_paths_first")) {
       ctx.arg.search_paths_first = true;
     } else if (read_flag("-search_dylibs_first")) {
