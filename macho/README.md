@@ -41,6 +41,22 @@ Mach-O's dynamic symbols are stored as a trie so that symbols' common
 prefixes are shared in a file. In ELF, dynamic symbol strings are just a
 run of NUL-terminated strings. So, Mach-O is more complicated but compact.
 
+# Re-exported libraries
+
+Mach-O dylibs can refer other dylibs as "reexported libraries". If
+`libfoo.dylib` refers `libbar.dylib` as a reexported library, all symbols
+defined by `libbar.dylib` become available as if they were defined by
+`libfoo.dylib`.
+
+The purpose of reexporting is to give developers freedom to reorganize their
+libraries while keeping the programming interface the same. For example,
+macOS's `libSystem.dylib` provides basic functionalities for macOS apps. Apple
+developers may want to move some features out of `libSystem.dylib` to a new
+dylib. They can safely do this by referring the new dylib as a reexported
+library of `libSystem.dylib`. If there's no reexporting feature, they can't do
+this without asking other developers to add a new `-l` line to their build
+file.
+
 # Endianness and bitwidth
 
 Since Mach-O is effectively used only by Apple, and all Apple systems are
