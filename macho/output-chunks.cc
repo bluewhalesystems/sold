@@ -733,9 +733,17 @@ inline void RebaseSection<E>::copy_buf(Context<E> &ctx) {
   write_vector(ctx.buf + this->hdr.offset, contents);
 }
 
-inline BindEncoder::BindEncoder() {
-  buf.push_back(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER);
-}
+template <typename E>
+struct BindEntry {
+  BindEntry(const BindEntry &) = default;
+  BindEntry(Symbol<E> *sym, i32 seg_idx, i32 offset, i64 addend)
+    : sym(sym), seg_idx(seg_idx), offset(offset), addend(addend) {}
+
+  Symbol<E> *sym;
+  i32 seg_idx;
+  i32 offset;
+  i64 addend;
+};
 
 template <typename E>
 static i32 get_dylib_idx(InputFile<E> *file) {
@@ -745,69 +753,76 @@ static i32 get_dylib_idx(InputFile<E> *file) {
 }
 
 template <typename E>
-inline void BindEncoder::add(Symbol<E> &sym, i64 seg_idx, i64 offset, i64 addend) {
-  i64 dylib_idx = get_dylib_idx(sym.file);
-  i64 flags = (sym.is_weak ? BIND_SYMBOL_FLAGS_WEAK_IMPORT : 0);
+std::vector<u8> encode_bindings(std::vector<BindEntry<E>> &bindings) {
+  std::vector<u8> buf;
+  buf.push_back(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER);
 
-  if (last_dylib != dylib_idx) {
-    if (dylib_idx < 0) {
-      buf.push_back(BIND_OPCODE_SET_DYLIB_SPECIAL_IMM |
-                    (dylib_idx & BIND_IMMEDIATE_MASK));
-    } else if (dylib_idx < 16) {
-      buf.push_back(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM | dylib_idx);
-    } else {
-      buf.push_back(BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB);
-      encode_uleb(buf, dylib_idx);
+  // Sort the vector to minimize the encoded binding info size.
+  sort(bindings, [](const BindEntry<E> &a, const BindEntry<E> &b) {
+    return std::tuple(a.sym->name, a.seg_idx, a.offset, a.addend) <
+           std::tuple(b.sym->name, b.seg_idx, b.offset, b.addend);
+  });
+
+  // Encode bindings
+  for (i64 i = 0; i < bindings.size(); i++) {
+    BindEntry<E> &b = bindings[i];
+    BindEntry<E> *last = (i == 0) ? nullptr : &bindings[i - 1];
+
+    if (!last || b.sym->file != last->sym->file) {
+      i64 idx = get_dylib_idx(b.sym->file);
+      if (idx < 0) {
+        buf.push_back(BIND_OPCODE_SET_DYLIB_SPECIAL_IMM |
+                      (idx & BIND_IMMEDIATE_MASK));
+      } else if (idx < 16) {
+        buf.push_back(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM | idx);
+      } else {
+        buf.push_back(BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB);
+        encode_uleb(buf, idx);
+      }
     }
+
+    if (!last || last->sym->name != b.sym->name ||
+        last->sym->is_weak != b.sym->is_weak) {
+      i64 flags = (b.sym->is_weak ? BIND_SYMBOL_FLAGS_WEAK_IMPORT : 0);
+      buf.push_back(BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM | flags);
+
+      std::string_view name = b.sym->name;
+      buf.insert(buf.end(), (u8 *)name.data(), (u8 *)(name.data() + name.size()));
+      buf.push_back('\0');
+    }
+
+    if (!last || last->seg_idx != b.seg_idx || last->offset != b.offset) {
+      assert(b.seg_idx < 16);
+      buf.push_back(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | b.seg_idx);
+      encode_uleb(buf, b.offset);
+    }
+
+    if (!last || last->addend != b.addend) {
+      buf.push_back(BIND_OPCODE_SET_ADDEND_SLEB);
+      encode_sleb(buf, b.addend);
+    }
+
+    buf.push_back(BIND_OPCODE_DO_BIND);
   }
 
-  if (last_name != sym.name || last_flags != flags) {
-    assert(flags < 16);
-    buf.push_back(BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM | flags);
-    buf.insert(buf.end(), (u8 *)sym.name.data(),
-               (u8 *)(sym.name.data() + sym.name.size()));
-    buf.push_back('\0');
-  }
-
-  if (last_seg != seg_idx || last_offset != offset) {
-    assert(seg_idx < 16);
-    buf.push_back(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | seg_idx);
-    encode_uleb(buf, offset);
-  }
-
-  if (last_addend != addend) {
-    buf.push_back(BIND_OPCODE_SET_ADDEND_SLEB);
-    encode_sleb(buf, addend);
-  }
-
-  buf.push_back(BIND_OPCODE_DO_BIND);
-
-  last_dylib = dylib_idx;
-  last_name = sym.name;
-  last_flags = flags;
-  last_seg = seg_idx;
-  last_offset = offset;
-  last_addend = addend;
-}
-
-inline void BindEncoder::finish() {
   buf.push_back(BIND_OPCODE_DONE);
   buf.resize(align_to(buf.size(), 8));
+  return buf;
 }
 
 template <typename E>
 void BindSection<E>::compute_size(Context<E> &ctx) {
-  BindEncoder enc;
+  std::vector<BindEntry<E>> vec;
 
   for (Symbol<E> *sym : ctx.got.syms)
     if (sym->is_imported)
-      enc.add(*sym, ctx.data_const_seg->seg_idx,
-              sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr, 0);
+      vec.emplace_back(sym, ctx.data_const_seg->seg_idx,
+                       sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr, 0);
 
   for (Symbol<E> *sym : ctx.thread_ptrs.syms)
     if (sym->is_imported)
-      enc.add(*sym, ctx.data_seg->seg_idx,
-              sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr, 0);
+      vec.emplace_back(sym, ctx.data_seg->seg_idx,
+                       sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr, 0);
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
     for (Chunk<E> *chunk : seg->chunks)
@@ -815,12 +830,11 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
         for (Subsection<E> *subsec : osec->members)
           for (Relocation<E> &r : subsec->get_rels())
             if (r.type == E::abs_rel && r.sym && r.sym->is_imported)
-              enc.add(*r.sym, seg->seg_idx,
-                      subsec->get_addr(ctx) + r.offset - seg->cmd.vmaddr,
-                      r.addend);
+              vec.emplace_back(r.sym, seg->seg_idx,
+                               subsec->get_addr(ctx) + r.offset - seg->cmd.vmaddr,
+                               r.addend);
 
-  enc.finish();
-  contents = std::move(enc.buf);
+  contents = encode_bindings(vec);
   this->hdr.size = contents.size();
 }
 
