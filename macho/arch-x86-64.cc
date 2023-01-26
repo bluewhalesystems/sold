@@ -158,6 +158,10 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       if (sym->is_imported)
         r.needs_dynrel = true;
       break;
+    case X86_64_RELOC_BRANCH:
+      if (sym->is_imported)
+        sym->flags |= NEEDS_STUB;
+      break;
     case X86_64_RELOC_GOT:
     case X86_64_RELOC_GOT_LOAD:
       sym->flags |= NEEDS_GOT;
@@ -166,9 +170,6 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       sym->flags |= NEEDS_THREAD_PTR;
       break;
     }
-
-    if (sym->is_imported)
-      sym->flags |= NEEDS_STUB;
   }
 }
 

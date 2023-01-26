@@ -208,6 +208,10 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       if (sym->is_imported)
         r.needs_dynrel = true;
       break;
+    case ARM64_RELOC_BRANCH26:
+      if (sym->is_imported)
+        sym->flags |= NEEDS_STUB;
+      break;
     case ARM64_RELOC_GOT_LOAD_PAGE21:
     case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
     case ARM64_RELOC_POINTER_TO_GOT:
@@ -218,9 +222,6 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       sym->flags |= NEEDS_THREAD_PTR;
       break;
     }
-
-    if (sym->is_imported)
-      sym->flags |= NEEDS_STUB;
   }
 }
 
