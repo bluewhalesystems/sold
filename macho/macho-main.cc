@@ -411,9 +411,7 @@ static void create_synthetic_chunks(Context<E> &ctx) {
         if (osec->members.empty())
           continue;
 
-    OutputSegment<E> *seg =
-      OutputSegment<E>::get_instance(ctx, chunk->hdr.get_segname());
-    seg->chunks.push_back(chunk);
+    chunk->seg->chunks.push_back(chunk);
   }
 
   // Handle -add_empty_section

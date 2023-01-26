@@ -812,29 +812,37 @@ std::vector<u8> encode_bindings(std::vector<BindEntry<E>> &bindings) {
 
 template <typename E>
 void BindSection<E>::compute_size(Context<E> &ctx) {
-  std::vector<BindEntry<E>> vec;
+  std::vector<std::vector<BindEntry<E>>> vec(ctx.objs.size());
+
+  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
+    for (Subsection<E> *subsec : ctx.objs[i]->subsections) {
+      if (subsec->is_alive) {
+        for (Relocation<E> &r : subsec->get_rels()) {
+          if (r.type == E::abs_rel && r.sym && r.sym->is_imported) {
+            OutputSegment<E> &seg = *subsec->isec.osec.seg;
+            vec[i].emplace_back(r.sym, seg.seg_idx,
+                                subsec->get_addr(ctx) + r.offset - seg.cmd.vmaddr,
+                                r.addend);
+          }
+        }
+      }
+    }
+  });
+
+  std::vector<BindEntry<E>> bindings = flatten(vec);
 
   for (Symbol<E> *sym : ctx.got.syms)
     if (sym->is_imported)
-      vec.emplace_back(sym, ctx.data_const_seg->seg_idx,
-                       sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr, 0);
+      bindings.emplace_back(sym, ctx.data_const_seg->seg_idx,
+                            sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr,
+                            0);
 
   for (Symbol<E> *sym : ctx.thread_ptrs.syms)
     if (sym->is_imported)
-      vec.emplace_back(sym, ctx.data_seg->seg_idx,
-                       sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr, 0);
+      bindings.emplace_back(sym, ctx.data_seg->seg_idx,
+                            sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr, 0);
 
-  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
-    for (Chunk<E> *chunk : seg->chunks)
-      if (OutputSection<E> *osec = chunk->to_osec())
-        for (Subsection<E> *subsec : osec->members)
-          for (Relocation<E> &r : subsec->get_rels())
-            if (r.type == E::abs_rel && r.sym && r.sym->is_imported)
-              vec.emplace_back(r.sym, seg->seg_idx,
-                               subsec->get_addr(ctx) + r.offset - seg->cmd.vmaddr,
-                               r.addend);
-
-  contents = encode_bindings(vec);
+  contents = encode_bindings(bindings);
   this->hdr.size = contents.size();
 }
 

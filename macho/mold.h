@@ -374,6 +374,7 @@ public:
     ctx.chunks.push_back(this);
     hdr.set_segname(segname);
     hdr.set_sectname(sectname);
+    seg = OutputSegment<E>::get_instance(ctx, segname);
   }
 
   virtual ~Chunk() = default;
@@ -385,6 +386,7 @@ public:
   MachSection hdr = {};
   u32 sect_idx = 0;
   bool is_hidden = false;
+  OutputSegment<E> *seg = nullptr;
 
 protected:
   bool is_output_section = false;
