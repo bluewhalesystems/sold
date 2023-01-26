@@ -41,6 +41,26 @@ Mach-O's dynamic symbols are stored as a trie so that symbols' common
 prefixes are shared in a file. In ELF, dynamic symbol strings are just a
 run of NUL-terminated strings. So, Mach-O is more complicated but compact.
 
+# Lazy function symbol resolution
+
+Lazy function symbol resolution is done in Mach-O in the same way as ELF
+but with slightly different file layout.
+
+`__stubs` section contains PLT entries. It reads a function address from
+`__la_symbol_ptr` section and jump there.
+
+`__la_symbol_ptr` entries are initialized to point to entries in
+`__stubs_helper` section. If a PLT entry is called for the first time, the
+control is transferred to its corresponding entry in `__la_symbol_ptr`. It
+then calls dyld_stub_binder with appropriate arguments for symbol
+resolution.
+
+There's no notion of "canonical PLT" in Mach-O because the compiler always
+emit code to load a function pointer value from GOT even for `-fno-PIC`.
+In other words, the compiler always assumes that the address of a function
+is not known at link-time. Therefore, we'll never see an object file which
+assumes that a function address is a link-time constant.
+
 # Re-exported libraries
 
 Mach-O dylibs can refer other dylibs as "reexported libraries". If

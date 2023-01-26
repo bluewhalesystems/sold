@@ -24,17 +24,6 @@ static void write_ldr(u8 *loc, u32 val) {
   *(ul32 *)loc |= bits(val, 11, scale) << 10;
 }
 
-// Lazy function symbol resolution is done in Mach-O in the same way as
-// ELF but with slightly different file layout.
-//
-// __stubs section contains PLT entries. It reads a function address
-// from __la_symbol_ptr section and jump there.
-//
-// __la_symbol_ptr entries are initialized to point to entries in
-// __stubs_helper section. If a PLT entry is called for the first time,
-// the control is transferred to its corresponding entry in
-// __la_symbol_ptr. It then calls dyld_stub_binder with appropriate
-// arguments for symbol resolution.
 template <>
 void StubsSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
