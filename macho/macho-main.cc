@@ -534,18 +534,15 @@ template <typename E>
 static void merge_mergeable_sections(Context<E> &ctx) {
   Timer t(ctx, "merge_mergeable_sections");
 
-  for (Chunk<E> *chunk : ctx.chunks) {
-    if (OutputSection<E> *osec = chunk->to_osec()) {
-      switch (chunk->hdr.type) {
-      case S_CSTRING_LITERALS:
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (OutputSection<E> *osec = chunk->to_osec())
+      if (chunk->hdr.type == S_CSTRING_LITERALS)
         uniquify_cstrings(ctx, *osec);
-        break;
-      case S_LITERAL_POINTERS:
+
+  for (Chunk<E> *chunk : ctx.chunks)
+    if (OutputSection<E> *osec = chunk->to_osec())
+      if (chunk->hdr.type == S_LITERAL_POINTERS)
         uniquify_literal_pointers(ctx, *osec);
-        break;
-      }
-    }
-  }
 
   // Rewrite relocations and symbols.
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
@@ -566,6 +563,7 @@ static void merge_mergeable_sections(Context<E> &ctx) {
         sym->subsec = sym->subsec->replacer;
   });
 
+  // Remove deduplicated subsections from each file's subsection vector.
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->subsections, [](Subsection<E> *subsec) {
       return subsec->replacer;
@@ -1155,8 +1153,8 @@ int macho_main(int argc, char **argv) {
   else
     remove_unreferenced_subsections(ctx);
 
-  create_synthetic_chunks(ctx);
   merge_mergeable_sections(ctx);
+  create_synthetic_chunks(ctx);
 
   for (ObjectFile<E> *file : ctx.objs)
     file->check_duplicate_symbols(ctx);

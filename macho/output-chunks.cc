@@ -621,11 +621,12 @@ static std::vector<u8> encode_rebase_entries(std::vector<RebaseEntry> &rebases) 
   // Sort rebase entries to reduce the size of the output
   tbb::parallel_sort(rebases);
 
+  // Emit rebase records
   for (i64 i = 0; i < rebases.size();) {
     RebaseEntry &cur = rebases[i];
     RebaseEntry *last = (i == 0) ? nullptr : &rebases[i - 1];
 
-    // Write a segment index and a offset
+    // Write a segment index and an offset
     if (!last || last->seg_idx != cur.seg_idx) {
       buf.push_back(REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | cur.seg_idx);
       encode_uleb(buf, cur.offset);
@@ -666,23 +667,6 @@ static std::vector<u8> encode_rebase_entries(std::vector<RebaseEntry> &rebases) 
 
 template <typename E>
 inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
-  std::vector<RebaseEntry> vec;
-
-  for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
-    vec.emplace_back(ctx.data_seg->seg_idx,
-                     ctx.lazy_symbol_ptr.hdr.addr + i * word_size -
-                     ctx.data_seg->cmd.vmaddr);
-
-  for (Symbol<E> *sym : ctx.got.syms)
-    if (!sym->is_imported)
-      vec.emplace_back(ctx.data_const_seg->seg_idx,
-                       sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr);
-
-  for (Symbol<E> *sym : ctx.thread_ptrs.syms)
-    if (!sym->is_imported)
-      vec.emplace_back(ctx.data_seg->seg_idx,
-                       sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
-
   auto needs_rebasing = [](std::span<Relocation<E>> rels, i64 idx) {
     Relocation<E> &r = rels[idx];
 
@@ -709,23 +693,41 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
     return true;
   };
 
-  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments) {
-    for (Chunk<E> *chunk : seg->chunks) {
-      if (OutputSection<E> *osec = chunk->to_osec()) {
-        for (Subsection<E> *subsec : osec->members) {
-          std::span<Relocation<E>> rels = subsec->get_rels();
-          for (i64 i = 0; i < rels.size(); i++) {
-            if (needs_rebasing(rels, i))
-              vec.emplace_back(seg->seg_idx,
-                               subsec->get_addr(ctx) + rels[i].offset -
-                               seg->cmd.vmaddr);
-          }
-        }
-      }
-    }
-  }
+  std::vector<std::vector<RebaseEntry>> vec(ctx.objs.size());
 
-  contents = encode_rebase_entries(vec);
+  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
+    for (Subsection<E> *subsec : ctx.objs[i]->subsections) {
+      if (!subsec->is_alive)
+        continue;
+
+      std::span<Relocation<E>> rels = subsec->get_rels();
+      OutputSegment<E> &seg = *subsec->isec.osec.seg;
+      i64 base = subsec->get_addr(ctx) - seg.cmd.vmaddr;
+
+      for (i64 j = 0; j < rels.size(); j++)
+        if (needs_rebasing(rels, j))
+          vec[i].emplace_back(seg.seg_idx, base + rels[j].offset);
+    }
+  });
+
+  std::vector<RebaseEntry> rebases = flatten(vec);
+
+  for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
+    rebases.emplace_back(ctx.data_seg->seg_idx,
+                         ctx.lazy_symbol_ptr.hdr.addr + i * word_size -
+                         ctx.data_seg->cmd.vmaddr);
+
+  for (Symbol<E> *sym : ctx.got.syms)
+    if (!sym->is_imported)
+      rebases.emplace_back(ctx.data_const_seg->seg_idx,
+                           sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr);
+
+  for (Symbol<E> *sym : ctx.thread_ptrs.syms)
+    if (!sym->is_imported)
+      rebases.emplace_back(ctx.data_seg->seg_idx,
+                           sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
+
+  contents = encode_rebase_entries(rebases);
   this->hdr.size = contents.size();
 }
 
@@ -754,7 +756,7 @@ static i32 get_dylib_idx(InputFile<E> *file) {
 }
 
 template <typename E>
-std::vector<u8> encode_bindings(std::vector<BindEntry<E>> &bindings) {
+std::vector<u8> encode_bind_entries(std::vector<BindEntry<E>> &bindings) {
   std::vector<u8> buf;
   buf.push_back(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER);
 
@@ -843,7 +845,7 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
       bindings.emplace_back(sym, ctx.data_seg->seg_idx,
                             sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr, 0);
 
-  contents = encode_bindings(bindings);
+  contents = encode_bind_entries(bindings);
   this->hdr.size = contents.size();
 }
 
