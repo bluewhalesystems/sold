@@ -57,6 +57,32 @@ library of `libSystem.dylib`. If there's no reexporting feature, they can't do
 this without asking other developers to add a new `-l` line to their build
 file.
 
+# Thread-local variables
+
+If a symbol is of thread-local variable (TLV), it is defined in a
+`__thread_vars` section in an input file. A `__thread_vars` consists of
+a vector of three-word tuples of
+
+1. a function pointer to `tlv_get_addr`,
+2. an indirect pointer to the TLS block of the Mach-O image, and
+3. the offset within the TLS block.
+
+. You can obtain the address of a TLV by calling the function pointer
+with the address of the tuple as an argument. `tlv_get_addr` then adds
+the TLS block address and the offset to compute the address of the TLV.
+
+TLVs are always referenced by `ARM64_RELOC_TLVP_LOAD_*` relocations (or
+`X86_64_RELOC_TLV` relocation on x86-64). For each TLV referenced by these
+relocations, the linker creates an entry in the linker-synthesized
+`__thread_ptrs` section and let it refer to the address of its corresponding
+`tlv_get_addr` entry.
+
+TLVs are always referenced indirectly via `__thread_ptrs`. If a TLV is
+defined locally or resolved to the same Mach-O file, its `__thread_ptrs`
+entry refers to its `__thread_vars` entry in the same file. Otehrwise,
+the `__thread_ptr` entry refers to a `__thread_vars` entry in other Mach-O
+file image.
+
 # Endianness and bitwidth
 
 Since Mach-O is effectively used only by Apple, and all Apple systems are
