@@ -792,7 +792,7 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
       if (OutputSection<E> *osec = chunk->to_osec())
         for (Subsection<E> *subsec : osec->members)
           for (Relocation<E> &r : subsec->get_rels())
-            if (r.needs_dynrel)
+            if (r.type == E::abs_rel && r.sym && r.sym->is_imported)
               enc.add(*r.sym, seg->seg_idx,
                       subsec->get_addr(ctx) + r.offset - seg->cmd.vmaddr,
                       r.addend);

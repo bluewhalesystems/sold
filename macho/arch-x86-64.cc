@@ -154,10 +154,6 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       ((DylibFile<E> *)sym->file)->is_alive = true;
 
     switch (r.type) {
-    case X86_64_RELOC_UNSIGNED:
-      if (sym->is_imported)
-        r.needs_dynrel = true;
-      break;
     case X86_64_RELOC_BRANCH:
       if (sym->is_imported)
         sym->flags |= NEEDS_STUB;
@@ -185,9 +181,6 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       continue;
     }
 
-    if (r.needs_dynrel)
-      continue;
-
     u8 *loc = buf + r.offset;
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
@@ -199,6 +192,10 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     case X86_64_RELOC_UNSIGNED:
       ASSERT(!r.is_pcrel);
       ASSERT(r.size == 8);
+
+      if (r.sym && r.sym->is_imported)
+        break;
+
       if (r.refers_tls())
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else

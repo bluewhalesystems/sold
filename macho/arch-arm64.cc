@@ -204,10 +204,6 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       ((DylibFile<E> *)sym->file)->is_alive = true;
 
     switch (r.type) {
-    case ARM64_RELOC_UNSIGNED:
-      if (sym->is_imported)
-        r.needs_dynrel = true;
-      break;
     case ARM64_RELOC_BRANCH26:
       if (sym->is_imported)
         sym->flags |= NEEDS_STUB;
@@ -237,9 +233,6 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       continue;
     }
 
-    if (r.needs_dynrel)
-      continue;
-
     u8 *loc = buf + r.offset;
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
@@ -249,10 +242,15 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
-      // __thread_vars contains TP-relative addresses to symbols in the
-      // TLS initialization image (i.e. __thread_data and __thread_bss).
       ASSERT(!r.is_pcrel);
       ASSERT(r.size == 8);
+
+      // Do not write a value if we have a dynamic relocation for this reloc.
+      if (r.sym && r.sym->is_imported)
+        break;
+
+      // __thread_vars contains TP-relative addresses to symbols in the
+      // TLS initialization image (i.e. __thread_data and __thread_bss).
       if (r.refers_tls())
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else

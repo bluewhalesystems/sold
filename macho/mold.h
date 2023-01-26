@@ -52,7 +52,6 @@ struct Relocation {
   u8 size = 0;
   bool is_pcrel : 1 = false;
   bool is_subtracted : 1 = false;
-  bool needs_dynrel : 1 = false;
   i64 addend = 0;
   Symbol<E> *sym = nullptr;
   Subsection<E> *subsec = nullptr;
