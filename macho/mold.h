@@ -460,21 +460,6 @@ public:
   std::vector<std::unique_ptr<RangeExtensionThunk<E>>> thunks;
 };
 
-class RebaseEncoder {
-public:
-  RebaseEncoder();
-  void add(i64 seg_idx, i64 offset);
-  void flush();
-  void finish();
-
-  std::vector<u8> buf;
-
-private:
-  i64 cur_seg = -1;
-  i64 cur_off = 0;
-  i64 times = 0;
-};
-
 template <typename E>
 class RebaseSection : public Chunk<E> {
 public:

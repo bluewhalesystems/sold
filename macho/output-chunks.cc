@@ -605,82 +605,83 @@ void OutputSegment<E>::set_offset_linkedit(Context<E> &ctx, i64 fileoff,
   cmd.filesize = fileoff - cmd.fileoff;
 }
 
-inline RebaseEncoder::RebaseEncoder() {
+struct RebaseEntry {
+  RebaseEntry(const RebaseEntry &) = default;
+  RebaseEntry(i32 seg_idx, i32 offset) : seg_idx(seg_idx), offset(offset) {}
+  auto operator<=>(const RebaseEntry &) const = default;
+
+  i32 seg_idx;
+  i32 offset;
+};
+
+static std::vector<u8> encode_rebase_entries(std::vector<RebaseEntry> &rebases) {
+  std::vector<u8> buf;
   buf.push_back(REBASE_OPCODE_SET_TYPE_IMM | REBASE_TYPE_POINTER);
-}
 
-inline void RebaseEncoder::add(i64 seg_idx, i64 offset) {
-  assert(seg_idx < 16);
+  // Sort rebase entries to reduce the size of the output
+  tbb::parallel_sort(rebases);
 
-  // Accumulate consecutive base relocations
-  if (seg_idx == cur_seg && offset == cur_off) {
-    cur_off += 8;
-    times++;
-    return;
-  }
+  for (i64 i = 0; i < rebases.size();) {
+    RebaseEntry &cur = rebases[i];
+    RebaseEntry *last = (i == 0) ? nullptr : &rebases[i - 1];
 
-  // Flush the accumulated base relocations
-  flush();
-
-  // Advance the cursor
-  if (seg_idx != cur_seg || offset < cur_off) {
-    buf.push_back(REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | seg_idx);
-    encode_uleb(buf, offset);
-  } else {
-    i64 dist = offset - cur_off;
-    assert(dist >= 0);
-
-    if (dist % 8 == 0 && dist < 128) {
-      buf.push_back(REBASE_OPCODE_ADD_ADDR_IMM_SCALED | (dist >> 3));
+    // Write a segment index and a offset
+    if (!last || last->seg_idx != cur.seg_idx) {
+      buf.push_back(REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | cur.seg_idx);
+      encode_uleb(buf, cur.offset);
     } else {
-      buf.push_back(REBASE_OPCODE_ADD_ADDR_ULEB);
-      encode_uleb(buf, dist);
+      i64 dist = cur.offset - last->offset - 8;
+      assert(dist >= 0);
+
+      if (dist % 8 == 0 && dist < 128) {
+        buf.push_back(REBASE_OPCODE_ADD_ADDR_IMM_SCALED | (dist >> 3));
+      } else {
+        buf.push_back(REBASE_OPCODE_ADD_ADDR_ULEB);
+        encode_uleb(buf, dist);
+      }
     }
+
+    // Advance j so that j refers to past of the end of consecutive relocs
+    i64 j = i + 1;
+    while (j < rebases.size() &&
+           rebases[j - 1].seg_idx == rebases[j].seg_idx &&
+           rebases[j - 1].offset + 8 == rebases[j].offset)
+      j++;
+
+    // Write the consecutive relocs
+    if (j - i < 16) {
+      buf.push_back(REBASE_OPCODE_DO_REBASE_IMM_TIMES | (j - i));
+    } else {
+      buf.push_back(REBASE_OPCODE_DO_REBASE_ULEB_TIMES);
+      encode_uleb(buf, j - i);
+    }
+
+    i = j;
   }
 
-  cur_seg = seg_idx;
-  cur_off = offset + 8;
-  times = 1;
-}
-
-inline void RebaseEncoder::flush() {
-  if (times == 0)
-    return;
-
-  if (times < 16) {
-    buf.push_back(REBASE_OPCODE_DO_REBASE_IMM_TIMES | times);
-  } else {
-    buf.push_back(REBASE_OPCODE_DO_REBASE_ULEB_TIMES);
-    encode_uleb(buf, times);
-  }
-
-  times = 0;
-}
-
-inline void RebaseEncoder::finish() {
-  flush();
   buf.push_back(REBASE_OPCODE_DONE);
   buf.resize(align_to(buf.size(), 8));
+  return buf;
 }
 
 template <typename E>
 inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
-  RebaseEncoder enc;
+  std::vector<RebaseEntry> vec;
 
   for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
-    enc.add(ctx.data_seg->seg_idx,
-            ctx.lazy_symbol_ptr.hdr.addr + i * word_size -
-            ctx.data_seg->cmd.vmaddr);
+    vec.emplace_back(ctx.data_seg->seg_idx,
+                     ctx.lazy_symbol_ptr.hdr.addr + i * word_size -
+                     ctx.data_seg->cmd.vmaddr);
 
   for (Symbol<E> *sym : ctx.got.syms)
     if (!sym->is_imported)
-      enc.add(ctx.data_const_seg->seg_idx,
-              sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr);
+      vec.emplace_back(ctx.data_const_seg->seg_idx,
+                       sym->get_got_addr(ctx) - ctx.data_const_seg->cmd.vmaddr);
 
   for (Symbol<E> *sym : ctx.thread_ptrs.syms)
     if (!sym->is_imported)
-      enc.add(ctx.data_seg->seg_idx,
-              sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
+      vec.emplace_back(ctx.data_seg->seg_idx,
+                       sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
 
   auto needs_rebasing = [](std::span<Relocation<E>> rels, i64 idx) {
     Relocation<E> &r = rels[idx];
@@ -715,16 +716,16 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
           std::span<Relocation<E>> rels = subsec->get_rels();
           for (i64 i = 0; i < rels.size(); i++) {
             if (needs_rebasing(rels, i))
-              enc.add(seg->seg_idx,
-                      subsec->get_addr(ctx) + rels[i].offset - seg->cmd.vmaddr);
+              vec.emplace_back(seg->seg_idx,
+                               subsec->get_addr(ctx) + rels[i].offset -
+                               seg->cmd.vmaddr);
           }
         }
       }
     }
   }
 
-  enc.finish();
-  contents = std::move(enc.buf);
+  contents = encode_rebase_entries(vec);
   this->hdr.size = contents.size();
 }
 
