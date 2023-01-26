@@ -120,8 +120,6 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
     vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
-    rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
-
     i64 addend = read_addend(file.mf->data + hdr.offset, r) +
                  get_reloc_addend(r.type);
 

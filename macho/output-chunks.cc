@@ -682,9 +682,16 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
       enc.add(ctx.data_seg->seg_idx,
               sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
 
-  auto needs_rebasing = [](Relocation<E> &r) {
+  auto needs_rebasing = [](std::span<Relocation<E>> rels, i64 idx) {
+    Relocation<E> &r = rels[idx];
+
     // Rebase only ARM64_RELOC_UNSIGNED or X86_64_RELOC_UNSIGNED relocs.
-    if (r.type != E::abs_rel || r.is_subtracted)
+    if (r.type != E::abs_rel)
+      return false;
+
+    // If the reloc specifies the relative address between two relocations,
+    // we don't need a rebase reloc.
+    if (idx > 0 && rels[idx - 1].type == E::subtractor_rel)
       return false;
 
     // If we have a dynamic reloc, we don't need to rebase it.
@@ -701,14 +708,20 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
     return true;
   };
 
-  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
-    for (Chunk<E> *chunk : seg->chunks)
-      if (OutputSection<E> *osec = chunk->to_osec())
-        for (Subsection<E> *subsec : osec->members)
-          for (Relocation<E> &rel : subsec->get_rels())
-            if (needs_rebasing(rel))
+  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments) {
+    for (Chunk<E> *chunk : seg->chunks) {
+      if (OutputSection<E> *osec = chunk->to_osec()) {
+        for (Subsection<E> *subsec : osec->members) {
+          std::span<Relocation<E>> rels = subsec->get_rels();
+          for (i64 i = 0; i < rels.size(); i++) {
+            if (needs_rebasing(rels, i))
               enc.add(seg->seg_idx,
-                      subsec->get_addr(ctx) + rel.offset - seg->cmd.vmaddr);
+                      subsec->get_addr(ctx) + rels[i].offset - seg->cmd.vmaddr);
+          }
+        }
+      }
+    }
+  }
 
   enc.finish();
   contents = std::move(enc.buf);

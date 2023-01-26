@@ -162,7 +162,6 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
-    rel.is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR);
 
     if (r.is_extern) {
       rel.sym = file.syms[r.idx];
