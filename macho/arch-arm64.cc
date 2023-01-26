@@ -13,7 +13,7 @@ static u64 page_offset(u64 hi, u64 lo) {
   return (bits(val, 13, 12) << 29) | (bits(val, 32, 14) << 5);
 }
 
-static void write_ldr(u8 *loc, u32 val) {
+static void write_ldst(u8 *loc, u32 val) {
   u32 insn = *(ul32 *)loc;
   i64 scale = 0;
   if ((insn & 0x3b000000) == 0x39000000) {
@@ -265,13 +265,13 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       *(ul32 *)loc |= page_offset(S + A, P);
       break;
     case ARM64_RELOC_PAGEOFF12:
-      write_ldr(loc, S + A);
+      write_ldst(loc, S + A);
       break;
     case ARM64_RELOC_GOT_LOAD_PAGE21:
       *(ul32 *)loc |= page_offset(G + GOT + A, P);
       break;
     case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
-      write_ldr(loc, G + GOT + A);
+      write_ldst(loc, G + GOT + A);
       break;
     case ARM64_RELOC_POINTER_TO_GOT:
       ASSERT(r.size == 4);
@@ -281,7 +281,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       *(ul32 *)loc |= page_offset(r.sym->get_tlv_addr(ctx) + A, P);
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
-      write_ldr(loc, r.sym->get_tlv_addr(ctx) + A);
+      write_ldst(loc, r.sym->get_tlv_addr(ctx) + A);
       break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;

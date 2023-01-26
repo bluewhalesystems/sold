@@ -237,7 +237,9 @@ std::ostream &operator<<(std::ostream &out, const InputSection<E> &sec);
 template <typename E>
 class Subsection {
 public:
-  inline u64 get_addr(Context<E> &ctx) const;
+  u64 get_addr(Context<E> &ctx) const {
+    return isec.osec.hdr.addr + output_offset;
+  }
 
   std::string_view get_contents() {
     assert(isec.hdr.type != S_ZEROFILL);
@@ -1034,11 +1036,6 @@ std::ostream &operator<<(std::ostream &out, const InputSection<E> &sec) {
   out << sec.file << "(" << sec.hdr.get_segname() << ","
       << sec.hdr.get_sectname() << ")";
   return out;
-}
-
-template <typename E>
-u64 Subsection<E>::get_addr(Context<E> &ctx) const {
-  return isec.osec.hdr.addr + output_offset;
 }
 
 template <typename E>
