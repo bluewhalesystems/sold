@@ -230,13 +230,16 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
   for (i64 i = 0; i < rels.size(); i++) {
     Relocation<E> &r = rels[i];
-    u8 *loc = buf + r.offset;
 
     if (r.sym && !r.sym->file) {
       Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym;
       continue;
     }
 
+    if (r.needs_dynrel)
+      continue;
+
+    u8 *loc = buf + r.offset;
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
     u64 P = get_addr(ctx) + r.offset;
@@ -245,13 +248,10 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
-      ASSERT(!r.is_pcrel);
-      ASSERT(r.size == 8);
-      if (r.needs_dynrel)
-        break;
-
       // __thread_vars contains TP-relative addresses to symbols in the
       // TLS initialization image (i.e. __thread_data and __thread_bss).
+      ASSERT(!r.is_pcrel);
+      ASSERT(r.size == 8);
       if (r.refers_tls())
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else

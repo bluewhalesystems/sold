@@ -178,13 +178,16 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
   for (i64 i = 0; i < rels.size(); i++) {
     Relocation<E> &r = rels[i];
-    u8 *loc = buf + r.offset;
 
     if (r.sym && !r.sym->file) {
       Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym;
       continue;
     }
 
+    if (r.needs_dynrel)
+      continue;
+
+    u8 *loc = buf + r.offset;
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
     u64 P = get_addr(ctx) + r.offset;
