@@ -682,13 +682,23 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
       enc.add(ctx.data_seg->seg_idx,
               sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr);
 
-  auto refers_tls = [](Symbol<E> *sym) {
-    if (sym && sym->subsec) {
-      auto ty = sym->subsec->isec.osec.hdr.type;
-      return ty == S_THREAD_LOCAL_REGULAR || ty == S_THREAD_LOCAL_ZEROFILL ||
-             ty == S_THREAD_LOCAL_VARIABLES;
-    }
-    return false;
+  auto needs_rebasing = [](Relocation<E> &r) {
+    // Rebase only ARM64_RELOC_UNSIGNED or X86_64_RELOC_UNSIGNED relocs.
+    if (r.type != E::abs_rel || r.is_subtracted)
+      return false;
+
+    // If we have a dynamic reloc, we don't need to rebase it.
+    if (r.sym && r.sym->is_imported)
+      return false;
+
+    // If it refers a TLS block, it's already relative to the thread
+    // pointer, so it doesn't have to be adjusted to the loaded address.
+    if (r.sym && r.sym->subsec)
+      if (auto ty = r.sym->subsec->isec.osec.hdr.type;
+          ty == S_THREAD_LOCAL_REGULAR || ty == S_THREAD_LOCAL_ZEROFILL)
+        return false;
+
+    return true;
   };
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
@@ -696,8 +706,7 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
       if (OutputSection<E> *osec = chunk->to_osec())
         for (Subsection<E> *subsec : osec->members)
           for (Relocation<E> &rel : subsec->get_rels())
-            if (!rel.is_pcrel && !rel.is_subtracted && rel.type == E::abs_rel &&
-                !refers_tls(rel.sym))
+            if (needs_rebasing(rel))
               enc.add(seg->seg_idx,
                       subsec->get_addr(ctx) + rel.offset - seg->cmd.vmaddr);
 

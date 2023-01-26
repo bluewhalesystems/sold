@@ -50,7 +50,6 @@ struct Relocation {
   u32 offset = 0;
   u8 type = -1;
   u8 size = 0;
-  bool is_pcrel : 1 = false;
   bool is_subtracted : 1 = false;
   i64 addend = 0;
   Symbol<E> *sym = nullptr;

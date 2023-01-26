@@ -427,7 +427,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
                  << " " << *this->syms[r.idx];
     };
 
-    if (r.is_pcrel || r.p2size != 3 || r.type)
+    if (r.p2size != 3 || r.type)
       error();
 
     switch (r.offset % sizeof(CompactUnwindEntry)) {

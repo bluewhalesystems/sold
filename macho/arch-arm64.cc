@@ -162,7 +162,6 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
-    rel.is_pcrel = r.is_pcrel;
     rel.is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR);
 
     if (r.is_extern) {
@@ -231,7 +230,6 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
-      ASSERT(!r.is_pcrel);
       ASSERT(r.size == 8);
 
       // Do not write a value if we have a dynamic relocation for this reloc.
@@ -277,7 +275,6 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       write_ldr(loc, G + GOT + A);
       break;
     case ARM64_RELOC_POINTER_TO_GOT:
-      ASSERT(r.is_pcrel);
       ASSERT(r.size == 4);
       *(ul32 *)loc = G + GOT + A - P;
       break;

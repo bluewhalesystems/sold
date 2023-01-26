@@ -120,7 +120,6 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
     vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
-    rel.is_pcrel = r.is_pcrel;
     rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
 
     i64 addend = read_addend(file.mf->data + hdr.offset, r) +
@@ -190,7 +189,6 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
-      ASSERT(!r.is_pcrel);
       ASSERT(r.size == 8);
 
       if (r.sym && r.sym->is_imported)
@@ -211,23 +209,19 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     case X86_64_RELOC_SIGNED_1:
     case X86_64_RELOC_SIGNED_2:
     case X86_64_RELOC_SIGNED_4:
-      ASSERT(r.is_pcrel);
       ASSERT(r.size == 4);
       *(ul32 *)loc = S + A - P - 4 - get_reloc_addend(r.type);
       break;
     case X86_64_RELOC_BRANCH:
-      ASSERT(r.is_pcrel);
       ASSERT(r.size == 4);
       *(ul32 *)loc = S + A - P - 4;
       break;
     case X86_64_RELOC_GOT_LOAD:
     case X86_64_RELOC_GOT:
-      ASSERT(r.is_pcrel);
       ASSERT(r.size == 4);
       *(ul32 *)loc = G + GOT + A - P - 4;
       break;
     case X86_64_RELOC_TLV:
-      ASSERT(r.is_pcrel);
       ASSERT(r.size == 4);
       *(ul32 *)loc = r.sym->get_tlv_addr(ctx) + A - P - 4;
       break;
