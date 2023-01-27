@@ -1095,18 +1095,18 @@ template <typename E>
 void SymtabSection<E>::compute_size(Context<E> &ctx) {
   std::string cwd = std::filesystem::current_path().string();
 
-  std::vector<InputFile<E> *> files;
-  append(files, ctx.objs);
-  append(files, ctx.dylibs);
+  std::vector<InputFile<E> *> vec;
+  append(vec, ctx.objs);
+  append(vec, ctx.dylibs);
 
   // Compute the number of symbols for each symbol type
-  tbb::parallel_for_each(files, [&](InputFile<E> *file) {
+  tbb::parallel_for_each(vec, [&](InputFile<E> *file) {
     file->compute_symtab_size(ctx);
   });
 
   // Compute the indices in the symbol table
-  InputFile<E> &first = *files.front();
-  InputFile<E> &last = *files.back();
+  InputFile<E> &first = *vec.front();
+  InputFile<E> &last = *vec.back();
 
   // Add -add_ast_path symbols first
   first.stabs_offset = ctx.arg.add_ast_path.size();
@@ -1115,40 +1115,35 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
     first.strtab_offset += s.size() + 1;
 
   // Add input file symbols
-  for (i64 i = 1; i < files.size(); i++)
-    files[i]->stabs_offset =
-      files[i - 1]->stabs_offset + files[i - 1]->num_stabs;
+  for (i64 i = 1; i < vec.size(); i++)
+    vec[i]->stabs_offset = vec[i - 1]->stabs_offset + vec[i - 1]->num_stabs;
 
   first.locals_offset = last.stabs_offset + last.num_stabs;
 
-  for (i64 i = 1; i < files.size(); i++)
-    files[i]->locals_offset =
-      files[i - 1]->locals_offset + files[i - 1]->num_locals;
+  for (i64 i = 1; i < vec.size(); i++)
+    vec[i]->locals_offset = vec[i - 1]->locals_offset + vec[i - 1]->num_locals;
 
   globals_offset = last.locals_offset + last.num_locals;
   first.globals_offset = globals_offset;
 
-  for (i64 i = 1; i < files.size(); i++)
-    files[i]->globals_offset =
-      files[i - 1]->globals_offset + files[i - 1]->num_globals;
+  for (i64 i = 1; i < vec.size(); i++)
+    vec[i]->globals_offset = vec[i - 1]->globals_offset + vec[i - 1]->num_globals;
 
   undefs_offset = last.globals_offset + last.num_globals;
   first.undefs_offset = undefs_offset;
 
-  for (i64 i = 1; i < files.size(); i++)
-    files[i]->undefs_offset =
-      files[i - 1]->undefs_offset + files[i - 1]->num_undefs;
+  for (i64 i = 1; i < vec.size(); i++)
+    vec[i]->undefs_offset = vec[i - 1]->undefs_offset + vec[i - 1]->num_undefs;
 
-  for (i64 i = 1; i < files.size(); i++)
-    files[i]->strtab_offset =
-      files[i - 1]->strtab_offset + files[i - 1]->strtab_size;
+  for (i64 i = 1; i < vec.size(); i++)
+    vec[i]->strtab_offset = vec[i - 1]->strtab_offset + vec[i - 1]->strtab_size;
 
   i64 num_symbols = last.undefs_offset + last.num_undefs;
   this->hdr.size = num_symbols * sizeof(MachSym);
   ctx.strtab.hdr.size = last.strtab_offset + last.strtab_size;
 
   // Update symbol's output_symtab_idx
-  tbb::parallel_for_each(files, [&](InputFile<E> *file) {
+  tbb::parallel_for_each(vec, [&](InputFile<E> *file) {
     i64 locals = file->locals_offset;
     i64 globals = file->globals_offset;
     i64 undefs = file->undefs_offset;
