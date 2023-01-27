@@ -858,6 +858,157 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
 }
 
 template <typename E>
+void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
+  auto get_fullpath = [&]() -> std::string {
+    if (!this->mf)
+      return "<internal>";
+
+    std::string name = path_clean(this->mf->name);
+    if (!this->mf->parent)
+      return name;
+
+    std::string parent = path_clean(this->mf->parent->name);
+    if (parent.starts_with('/'))
+      return parent + "(" + name + ")";
+    return ctx.cwd + "/" + parent + "(" + name + ")";
+  };
+
+  // Debug symbols. Mach-O executables and dylibs generally don't directly
+  // contain debug info records. Instead, they have only symbols that
+  // specify function/global variable names and their addresses along with
+  // pathnames to object files. The debugger reads the symbols on startup
+  // and read debug info from object files.
+  //
+  // Debug symbols are called "stab" symbols.
+  this->oso_name = get_fullpath();
+  this->strtab_size += this->oso_name.size() + 1;
+  this->num_stabs = 3;
+
+  // Symbols copied from an input symtab to the output symtab
+  for (Symbol<E> *sym : this->syms) {
+    if (!sym || sym->file != this || (sym->subsec && !sym->subsec->is_alive))
+      continue;
+
+    if (sym->is_imported)
+      this->num_undefs++;
+    else if (sym->scope == SCOPE_EXTERN)
+      this->num_globals++;
+    else
+      this->num_locals++;
+
+    if (sym->subsec)
+      this->num_stabs += sym->subsec->isec.hdr.is_text() ? 2 : 1;
+
+    this->strtab_size += sym->name.size() + 1;
+    sym->output_symtab_idx = -2;
+  }
+}
+
+template <typename E>
+void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
+  MachSym *buf = (MachSym *)(ctx.buf + ctx.symtab.hdr.offset);
+  u8 *strtab = ctx.buf + ctx.strtab.hdr.offset;
+  i64 stroff = this->strtab_offset;
+
+  // Write to the string table
+  std::vector<i32> pos(this->syms.size());
+
+  for (i64 i = 0; i < this->syms.size(); i++) {
+    Symbol<E> *sym = this->syms[i];
+    if (sym && sym->file == this && sym->output_symtab_idx != -1) {
+      pos[i] = stroff;
+      stroff += write_string(strtab + stroff, sym->name);
+    }
+  }
+
+  // Write debug symbols. A stab symbol of type N_SO with a nonempty name
+  // marks a start of a new object file.
+  //
+  // The first N_SO symbol is intended to have a source filename (e.g.
+  // path/too/foo.cc), but it looks like lldb doesn't actually use that
+  // symbol name. Souce filename is in the debug record and thus naturally
+  // lldb can read it, so it doesn't make much sense to parse a debug
+  // record just to set a source filename which will be ighnored. So, we
+  // always set a dummy name "-" as a filename.
+  //
+  // The following N_OSO symbol specifies a object file path, which is
+  // followed by N_FUN, N_STSYM or N_GSYM symbols for functions,
+  // file-scope global variables and global variables, respectively.
+  //
+  // N_FUN symbol is always emitted as a pair. The first N_FUN symbol
+  // specifies the start address of a function, and the second specifies
+  // the size.
+  //
+  // At the end of stab symbols, we have a N_SO symbol without symbol name
+  // as an end marker.
+  MachSym *stab = buf + this->stabs_offset;
+  i64 stab_idx = 2;
+
+  stab[0].stroff = 1; // string "-"
+  stab[0].n_type = N_SO;
+  stab[0].desc = 1;
+
+  stab[1].stroff = stroff;
+  stab[1].n_type = N_OSO;
+  stab[1].desc = 1;
+  stroff += write_string(strtab + stroff, this->oso_name);
+
+  for (i64 i = 0; i < this->syms.size(); i++) {
+    Symbol<E> *sym = this->syms[i];
+    if (!sym || sym->file != this || sym->output_symtab_idx == -1 || !sym->subsec)
+      continue;
+
+    stab[stab_idx].stroff = pos[i];
+    stab[stab_idx].sect = sym->subsec->isec.osec.sect_idx;
+    stab[stab_idx].value = sym->get_addr(ctx);
+
+    if (sym->subsec->isec.hdr.is_text()) {
+      stab[stab_idx].n_type = N_FUN;
+      stab[stab_idx + 1].n_type = N_FUN;
+      stab[stab_idx + 1].sect = sym->subsec->input_size;
+      stab_idx += 2;
+    } else {
+      stab[stab_idx].n_type = (sym->scope == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
+      stab_idx++;
+    }
+  }
+
+  assert(stab_idx == this->num_stabs - 1);
+  stab[stab_idx].n_type = N_SO;
+  stab[stab_idx].desc = 1;
+
+  // Copy symbols from input symtabs to the output sytmab
+  for (i64 i = 0; i < this->syms.size(); i++) {
+    Symbol<E> *sym = this->syms[i];
+    if (!sym || sym->file != this || sym->output_symtab_idx == -1)
+      continue;
+
+    MachSym &msym = buf[sym->output_symtab_idx];
+    msym.stroff = pos[i];
+    msym.is_extern = (sym->is_imported || sym->scope == SCOPE_EXTERN);
+    msym.type = (sym->is_imported ? N_UNDF : N_SECT);
+
+    if (sym->is_imported)
+      msym.sect = N_UNDF;
+    else if (sym->subsec)
+      msym.sect = sym->subsec->isec.osec.sect_idx;
+    else if (sym == ctx.__mh_execute_header)
+      msym.sect = ctx.text->sect_idx;
+    else if (sym == ctx.__dyld_private || sym == ctx.__mh_dylib_header ||
+             sym == ctx.__mh_bundle_header || sym == ctx.___dso_handle)
+      msym.sect = ctx.data->sect_idx;
+    else
+      msym.sect = N_ABS;
+
+    if (sym->referenced_dynamically)
+      msym.desc = REFERENCED_DYNAMICALLY;
+
+    if (!sym->is_imported && (!sym->subsec || sym->subsec->is_alive))
+      msym.value = sym->get_addr(ctx);
+  }
+}
+
+template <typename E>
 DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
     : InputFile<E>(mf) {
   this->is_dylib = true;
@@ -1084,6 +1235,40 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
       sym.value = 0;
       sym.is_common = false;
     }
+  }
+}
+
+template <typename E>
+void DylibFile<E>::compute_symtab_size(Context<E> &ctx) {
+  for (Symbol<E> *sym : this->syms) {
+    if (sym && sym->file == this && (sym->stub_idx != -1 || sym->got_idx != -1)) {
+      this->num_undefs++;
+      this->strtab_size += sym->name.size() + 1;
+      sym->output_symtab_idx = -2;
+    }
+  }
+}
+
+template <typename E>
+void DylibFile<E>::populate_symtab(Context<E> &ctx) {
+  MachSym *buf = (MachSym *)(ctx.buf + ctx.symtab.hdr.offset);
+  u8 *strtab = ctx.buf + ctx.strtab.hdr.offset;
+  i64 stroff = this->strtab_offset;
+
+  // Copy symbols from input symtabs to the output sytmab
+  for (i64 i = 0; i < this->syms.size(); i++) {
+    Symbol<E> *sym = this->syms[i];
+    if (!sym || sym->file != this || sym->output_symtab_idx == -1)
+      continue;
+
+    MachSym &msym = buf[sym->output_symtab_idx];
+    msym.stroff = stroff;
+    msym.is_extern = true;
+    msym.type = N_UNDF;
+    msym.sect = N_UNDF;
+    msym.desc = dylib_idx << 8;
+
+    stroff += write_string(strtab + stroff, sym->name);
   }
 }
 

@@ -90,6 +90,8 @@ class InputFile {
 public:
   virtual ~InputFile() = default;
   virtual void resolve_symbols(Context<E> &ctx) = 0;
+  virtual void compute_symtab_size(Context<E> &ctx) = 0;
+  virtual void populate_symtab(Context<E> &ctx) = 0;
 
   void clear_symbols();
 
@@ -114,7 +116,7 @@ public:
   i32 undefs_offset = 0;
   i32 strtab_size = 0;
   i32 strtab_offset = 0;
-  std::string absolute_path;
+  std::string oso_name;
 
 protected:
   InputFile(MappedFile<Context<E>> *mf) : mf(mf), filename(mf->name) {}
@@ -135,6 +137,8 @@ public:
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   void parse_compact_unwind(Context<E> &ctx, MachSection &hdr);
   void resolve_symbols(Context<E> &ctx) override;
+  void compute_symtab_size(Context<E> &ctx) override;
+  void populate_symtab(Context<E> &ctx) override;
   bool is_objc_object(Context<E> &ctx);
   void mark_live_objects(Context<E> &ctx,
                          std::function<void(ObjectFile<E> *)> feeder);
@@ -188,6 +192,8 @@ public:
 
   void parse(Context<E> &ctx);
   void resolve_symbols(Context<E> &ctx) override;
+  void compute_symtab_size(Context<E> &ctx) override;
+  void populate_symtab(Context<E> &ctx) override;
 
   std::string_view install_name;
   i64 dylib_idx = 0;
@@ -974,6 +980,7 @@ struct Context {
   u8 uuid[16] = {};
   bool has_error = false;
   u64 tls_begin = 0;
+  std::string cwd = std::filesystem::current_path().string();
 
   LTOPlugin lto = {};
   std::once_flag lto_plugin_loaded;
