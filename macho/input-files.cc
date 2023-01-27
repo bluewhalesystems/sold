@@ -753,6 +753,18 @@ std::string_view ObjectFile<E>::get_linker_optimization_hints(Context<E> &ctx) {
   return {};
 }
 
+// As a space optimization, Xcode 14 or later emits code to just call
+// `_objc_msgSend$foo` to call `_objc_msgSend` function with a selector
+// `foo`.
+//
+// It is now the linker's responsibility to synthesize code and data
+// for undefined symbol of the form `_objc_msgSend$<method_name>`.
+// To do so, we need to synthsize three subsections containing the following
+// pieces of code/data:
+//
+//  1. `__objc_stubs`:    containing machine code to call `_objc_msgSend`
+//  2. `__objc_methname`: containing a null-terminated method name string
+//  3. `__objc_selrefs`:  containing a pointer to the method name string
 template <typename E>
 void ObjectFile<E>::add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym) {
   assert(this == ctx.internal_obj);
