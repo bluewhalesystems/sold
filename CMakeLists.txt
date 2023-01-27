@@ -386,23 +386,6 @@ if(MOLD_IS_SOLD)
     )
 endif()
 
-# Add frequently included header files for pre-compiling.
-# target_precompile_headers is supported by CMake 3.16.0 or newer.
-if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.16.0")
-  if(MOLD_IS_SOLD)
-    target_precompile_headers(mold PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/elf/mold.h>"
-      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/macho/mold.h>")
-  else()
-    target_precompile_headers(mold PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/elf/mold.h>")
-  endif()
-
-  # ccache needs this flag along with `sloppiness = pch_defines,time_macros`
-  # to enable caching
-  target_compile_options(mold PRIVATE -fpch-preprocess)
-endif()
-
 include(CTest)
 
 if(BUILD_TESTING)
