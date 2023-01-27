@@ -508,6 +508,10 @@ struct MachSection {
     return get_segname() == segname && get_sectname() == sectname;
   }
 
+  bool is_text() const {
+    return (attr & S_ATTR_SOME_INSTRUCTIONS) || (attr & S_ATTR_PURE_INSTRUCTIONS);
+  }
+
   char sectname[16];
   char segname[16];
   ul64 addr;

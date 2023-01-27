@@ -104,14 +104,17 @@ public:
   std::string archive_name;
 
   // For SymtabSection
+  i32 num_stabs = 0;
   i32 num_locals = 0;
   i32 num_globals = 0;
   i32 num_undefs = 0;
+  i32 stabs_offset = 0;
   i32 locals_offset = 0;
   i32 globals_offset = 0;
   i32 undefs_offset = 0;
   i32 strtab_size = 0;
   i32 strtab_offset = 0;
+  std::string absolute_path;
 
 protected:
   InputFile(MappedFile<Context<E>> *mf) : mf(mf), filename(mf->name) {}
@@ -579,6 +582,8 @@ public:
 
   i64 globals_offset = 0;
   i64 undefs_offset = 0;
+
+  static constexpr std::string_view strtab_init_image = "\0-\0"sv;
 };
 
 template <typename E>

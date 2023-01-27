@@ -1093,9 +1093,21 @@ void FunctionStartsSection<E>::copy_buf(Context<E> &ctx) {
 // global or undef).
 template <typename E>
 void SymtabSection<E>::compute_size(Context<E> &ctx) {
-  std::vector<InputFile<E> *> files;
-  append(files, ctx.objs);
-  append(files, ctx.dylibs);
+  std::string cwd = std::filesystem::current_path().string();
+
+  auto get_fullpath = [&](InputFile<E> &file) -> std::string {
+    if (!file.mf)
+      return "<internal>";
+
+    std::string name = path_clean(file.mf->name);
+    if (!file.mf->parent)
+      return name;
+
+    std::string parent = path_clean(file.mf->parent->name);
+    if (parent.starts_with('/'))
+      return parent + "(" + name + ")";
+    return cwd + "/" + parent + "(" + name + ")";
+  };
 
   auto is_alive = [](Symbol<E> &sym) {
     if (sym.file->is_dylib)
@@ -1103,8 +1115,18 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
     return !sym.subsec || sym.subsec->is_alive;
   };
 
+  std::vector<InputFile<E> *> files;
+  append(files, ctx.objs);
+  append(files, ctx.dylibs);
+
   // Compute the number of symbols for each symbol type
   tbb::parallel_for_each(files, [&](InputFile<E> *file) {
+    if (!file->is_dylib) {
+      file->absolute_path = get_fullpath(*file);
+      file->strtab_size += file->absolute_path.size() + 1;
+      file->num_stabs = 3;
+    }
+
     for (Symbol<E> *sym : file->syms) {
       if (sym && sym->file == file && is_alive(*sym)) {
         if (sym->is_imported)
@@ -1113,6 +1135,9 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
           file->num_globals++;
         else
           file->num_locals++;
+
+        if (sym->subsec)
+          file->num_stabs += sym->subsec->isec.hdr.is_text() ? 2 : 1;
 
         file->strtab_size += sym->name.size() + 1;
       }
@@ -1124,12 +1149,18 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
   InputFile<E> &last = *files.back();
 
   // Add -add_ast_path symbols first
-  first.locals_offset = ctx.arg.add_ast_path.size();
-  first.strtab_offset = 1;
+  first.stabs_offset = ctx.arg.add_ast_path.size();
+  first.strtab_offset = strtab_init_image.size();
   for (std::string_view s : ctx.arg.add_ast_path)
     first.strtab_offset += s.size() + 1;
 
   // Add input file symbols
+  for (i64 i = 1; i < files.size(); i++)
+    files[i]->stabs_offset =
+      files[i - 1]->stabs_offset + files[i - 1]->num_stabs;
+
+  first.locals_offset = last.stabs_offset + last.num_stabs;
+
   for (i64 i = 1; i < files.size(); i++)
     files[i]->locals_offset =
       files[i - 1]->locals_offset + files[i - 1]->num_locals;
@@ -1180,12 +1211,14 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
   MachSym *buf = (MachSym *)(ctx.buf + this->hdr.offset);
 
   u8 *strtab = ctx.buf + ctx.strtab.hdr.offset;
-  strtab[0] = '\0';
 
   // Create symbols for -add_ast_path
   {
     i64 symoff = 0;
-    i64 stroff = 1;
+
+    memcpy(strtab, strtab_init_image.data(), strtab_init_image.size());
+    i64 stroff = strtab_init_image.size();
+
     for (std::string_view s : ctx.arg.add_ast_path) {
       MachSym &msym = buf[symoff++];
       msym.stroff = stroff;
@@ -1207,14 +1240,66 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
 
   tbb::parallel_for_each(files, [&](InputFile<E> *file) {
     i64 stroff = file->strtab_offset;
-    for (Symbol<E> *sym : file->syms) {
+
+    // Write to the string table
+    std::vector<i32> pos(file->syms.size());
+
+    for (i64 i = 0; i < file->syms.size(); i++) {
+      Symbol<E> *sym = file->syms[i];
+      if (sym && sym->file == file && sym->output_symtab_idx != -1) {
+        pos[i] = stroff;
+        stroff += write_string(strtab + stroff, sym->name);
+      }
+    }
+
+    // Write debug symbols
+    if (!file->is_dylib) {
+      MachSym *stab = buf + file->stabs_offset;
+      i64 stab_idx = 2;
+
+      stab[0].stroff = 1; // string "-"
+      stab[0].n_type = N_SO;
+      stab[0].desc = 1;
+
+      stab[1].stroff = stroff;
+      stab[1].n_type = N_OSO;
+      stab[1].desc = 1;
+      stroff += write_string(strtab + stroff, file->absolute_path);
+
+      for (i64 i = 0; i < file->syms.size(); i++) {
+        Symbol<E> *sym = file->syms[i];
+        if (!sym || sym->file != file || sym->output_symtab_idx == -1 ||
+            !sym->subsec)
+          continue;
+
+        stab[stab_idx].stroff = pos[i];
+        stab[stab_idx].sect = sym->subsec->isec.osec.sect_idx;
+        stab[stab_idx].value = sym->get_addr(ctx);
+
+        if (sym->subsec->isec.hdr.is_text()) {
+          stab[stab_idx].n_type = N_FUN;
+          stab[stab_idx + 1].n_type = N_FUN;
+          stab[stab_idx + 1].sect = sym->subsec->input_size;
+          stab_idx += 2;
+        } else {
+          stab[stab_idx].n_type = (sym->scope == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
+          stab_idx++;
+        }
+      }
+
+      assert(stab_idx == file->num_stabs - 1);
+      stab[stab_idx].n_type = N_SO;
+      stab[stab_idx].desc = 1;
+    }
+
+    // Copy symbols from input symtabs to the output sytmab
+    for (i64 i = 0; i < file->syms.size(); i++) {
+      Symbol<E> *sym = file->syms[i];
       if (!sym || sym->file != file || sym->output_symtab_idx == -1)
         continue;
 
       MachSym &msym = buf[sym->output_symtab_idx];
-      msym.stroff = stroff;
-      stroff += write_string(strtab + stroff, sym->name);
-
+      msym.stroff = pos[i];
       msym.is_extern = (sym->is_imported || sym->scope == SCOPE_EXTERN);
       msym.type = (sym->is_imported ? N_UNDF : N_SECT);
 
