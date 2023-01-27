@@ -1228,12 +1228,6 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
   }
 
   // Copy symbols from input files to an output file
-  Symbol<E> *mh_execute_header = get_symbol(ctx, "__mh_execute_header");
-  Symbol<E> *dyld_private = get_symbol(ctx, "__dyld_private");
-  Symbol<E> *mh_dylib_header = get_symbol(ctx, "__mh_dylib_header");
-  Symbol<E> *mh_bundle_header = get_symbol(ctx, "__mh_bundle_header");
-  Symbol<E> *dso_handle = get_symbol(ctx, "___dso_handle");
-
   std::vector<InputFile<E> *> files;
   append(files, ctx.objs);
   append(files, ctx.dylibs);
@@ -1307,10 +1301,10 @@ void SymtabSection<E>::copy_buf(Context<E> &ctx) {
         msym.sect = N_UNDF;
       else if (sym->subsec)
         msym.sect = sym->subsec->isec.osec.sect_idx;
-      else if (sym == mh_execute_header)
+      else if (sym == ctx.__mh_execute_header)
         msym.sect = ctx.text->sect_idx;
-      else if (sym == dyld_private || sym == mh_dylib_header ||
-               sym == mh_bundle_header || sym == dso_handle)
+      else if (sym == ctx.__dyld_private || sym == ctx.__mh_dylib_header ||
+               sym == ctx.__mh_bundle_header || sym == ctx.___dso_handle)
         msym.sect = ctx.data->sect_idx;
       else
         msym.sect = N_ABS;

@@ -129,34 +129,31 @@ static void create_internal_file(Context<E> &ctx) {
   ctx.objs.push_back(obj);
   ctx.internal_obj = obj;
 
-  auto add = [&](std::string_view name) {
-    Symbol<E> *sym = get_symbol(ctx, name);
+  auto add = [&](Symbol<E> *sym) {
     sym->file = obj;
     obj->syms.push_back(sym);
-    return sym;
   };
 
-  add("__dyld_private");
+  add(ctx.__dyld_private);
+  add(ctx.___dso_handle);
 
   switch (ctx.output_type) {
   case MH_EXECUTE: {
-    Symbol<E> *sym = add("__mh_execute_header");
-    sym->scope = SCOPE_EXTERN;
-    sym->referenced_dynamically = true;
-    sym->value = ctx.arg.pagezero_size;
+    add(ctx.__mh_execute_header);
+    ctx.__mh_execute_header->scope = SCOPE_EXTERN;
+    ctx.__mh_execute_header->referenced_dynamically = true;
+    ctx.__mh_execute_header->value = ctx.arg.pagezero_size;
     break;
   }
   case MH_DYLIB:
-    add("__mh_dylib_header");
+    add(ctx.__mh_dylib_header);
     break;
   case MH_BUNDLE:
-    add("__mh_bundle_header");
+    add(ctx.__mh_bundle_header);
     break;
   default:
     unreachable();
   }
-
-  add("___dso_handle");
 
   // Add start stop symbols.
   std::set<std::string_view> start_stop_symbols;
@@ -177,7 +174,7 @@ static void create_internal_file(Context<E> &ctx) {
   });
 
   for (std::string_view name : start_stop_symbols)
-    add(name);
+    add(get_symbol(ctx, name));
 }
 
 // Remove unreferenced subsections to eliminate code and data
@@ -655,10 +652,10 @@ static u64 get_tls_begin(Context<E> &ctx) {
 
 template <typename E>
 static void fix_synthetic_symbol_values(Context<E> &ctx) {
-  get_symbol(ctx, "__dyld_private")->value = ctx.data->hdr.addr;
-  get_symbol(ctx, "__mh_dylib_header")->value = ctx.data->hdr.addr;
-  get_symbol(ctx, "__mh_bundle_header")->value = ctx.data->hdr.addr;
-  get_symbol(ctx, "___dso_handle")->value = ctx.data->hdr.addr;
+  ctx.__dyld_private->value = ctx.data->hdr.addr;
+  ctx.__mh_dylib_header->value = ctx.data->hdr.addr;
+  ctx.__mh_bundle_header->value = ctx.data->hdr.addr;
+  ctx.___dso_handle->value = ctx.data->hdr.addr;
 
   auto find_segment = [&](std::string_view name) -> SegmentCommand * {
     for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)

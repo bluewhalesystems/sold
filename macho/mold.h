@@ -881,7 +881,13 @@ struct Context {
 
     bss->hdr.type = S_ZEROFILL;
     common->hdr.type = S_ZEROFILL;
+
     _objc_msgSend = get_symbol(*this, "_objc_msgSend");
+    __mh_execute_header = get_symbol(*this, "__mh_execute_header");
+    __dyld_private = get_symbol(*this, "__dyld_private");
+    __mh_dylib_header = get_symbol(*this, "__mh_dylib_header");
+    __mh_bundle_header = get_symbol(*this, "__mh_bundle_header");
+    ___dso_handle = get_symbol(*this, "___dso_handle");
   }
 
   Context(const Context<E> &) = delete;
@@ -1025,6 +1031,11 @@ struct Context {
   OutputSection<E> *common = nullptr;
 
   Symbol<E> *_objc_msgSend = nullptr;
+  Symbol<E> *__mh_execute_header = nullptr;
+  Symbol<E> *__dyld_private = nullptr;
+  Symbol<E> *__mh_dylib_header = nullptr;
+  Symbol<E> *__mh_bundle_header = nullptr;
+  Symbol<E> *___dso_handle = nullptr;
 };
 
 template <typename E>
