@@ -144,17 +144,21 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     // an addend for other types of relocations by prepending an ADDEND
     // reloc.
     switch (rels[i].type) {
-    case ARM64_RELOC_UNSIGNED:
-      if (rels[i].p2size == 2)
+    case ARM64_RELOC_UNSIGNED: {
+      i64 size = 1 << rels[i].p2size;
+      ASSERT(size == 4 || size == 8);
+      if (size == 4)
         addend = *(il32 *)(file.mf->data + hdr.offset + rels[i].offset);
-      else if (rels[i].p2size == 3)
-        addend = *(il64 *)(file.mf->data + hdr.offset + rels[i].offset);
       else
-        Fatal(ctx) << file << ": relocation with a bad p2size: " << rels[i].offset;
+        addend = *(il64 *)(file.mf->data + hdr.offset + rels[i].offset);
       break;
+    }
     case ARM64_RELOC_ADDEND:
       addend = sign_extend(rels[i].idx, 23);
       i++;
+      break;
+    case ARM64_RELOC_POINTER_TO_GOT:
+      ASSERT(rels[i].is_pcrel);
       break;
     }
 
@@ -163,6 +167,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
 
     Relocation<E> &rel = vec.back();
 
+    // A relocation refers to either a symbol or a section
     if (r.is_extern) {
       rel.sym = file.syms[r.idx];
       rel.addend = addend;
