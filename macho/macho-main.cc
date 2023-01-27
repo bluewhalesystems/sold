@@ -528,6 +528,11 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
       }
     }
   }
+
+  static Counter counter("num_merged_literal_pointers");
+  counter += std::erase_if(osec.members, [](Subsection<E> *subsec) {
+    return subsec->replacer;
+  });
 }
 
 template <typename E>
@@ -1153,8 +1158,8 @@ int macho_main(int argc, char **argv) {
   else
     remove_unreferenced_subsections(ctx);
 
-  merge_mergeable_sections(ctx);
   create_synthetic_chunks(ctx);
+  merge_mergeable_sections(ctx);
 
   for (ObjectFile<E> *file : ctx.objs)
     file->check_duplicate_symbols(ctx);
