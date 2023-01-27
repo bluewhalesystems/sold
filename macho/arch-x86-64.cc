@@ -39,12 +39,11 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
   static_assert(sizeof(insn0) == E::stub_helper_hdr_size);
 
   memcpy(buf, insn0, sizeof(insn0));
-  *(ul32 *)(buf + 3) =
-    get_symbol(ctx, "__dyld_private")->get_addr(ctx) - this->hdr.addr - 7;
+  *(ul32 *)(buf + 3) = ctx.__dyld_private->get_addr(ctx) - this->hdr.addr - 7;
   *(ul32 *)(buf + 11) =
-    get_symbol(ctx, "dyld_stub_binder")->get_got_addr(ctx) - this->hdr.addr - 15;
+    ctx.dyld_stub_binder->get_got_addr(ctx) - this->hdr.addr - 15;
 
-  buf += 16;
+  buf += sizeof(insn0);
 
   for (i64 i = 0; i < ctx.stubs.syms.size(); i++) {
     u8 insn[] = {
@@ -57,7 +56,7 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
     memcpy(buf, insn, sizeof(insn));
     *(ul32 *)(buf + 1) = ctx.stubs.bind_offsets[i];
     *(ul32 *)(buf + 6) = start - buf - 10;
-    buf += 10;
+    buf += sizeof(insn);
   }
 }
 

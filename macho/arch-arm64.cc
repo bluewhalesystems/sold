@@ -66,11 +66,11 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
   static_assert(sizeof(insn0) == E::stub_helper_hdr_size);
   memcpy(buf, insn0, sizeof(insn0));
 
-  u64 dyld_private = get_symbol(ctx, "__dyld_private")->get_addr(ctx);
+  u64 dyld_private = ctx.__dyld_private->get_addr(ctx);
   buf[0] |= page_offset(dyld_private, this->hdr.addr);
   buf[1] |= bits(dyld_private, 11, 0) << 10;
 
-  u64 stub_binder = get_symbol(ctx, "dyld_stub_binder")->get_got_addr(ctx);
+  u64 stub_binder = ctx.dyld_stub_binder->get_got_addr(ctx);
   buf[3] |= page_offset(stub_binder, this->hdr.addr - 12);
   buf[4] |= bits(stub_binder, 11, 0) << 10;
 

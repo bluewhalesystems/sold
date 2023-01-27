@@ -888,6 +888,7 @@ struct Context {
     bss->hdr.type = S_ZEROFILL;
     common->hdr.type = S_ZEROFILL;
 
+    dyld_stub_binder = get_symbol(*this, "dyld_stub_binder");
     _objc_msgSend = get_symbol(*this, "_objc_msgSend");
     __mh_execute_header = get_symbol(*this, "__mh_execute_header");
     __dyld_private = get_symbol(*this, "__dyld_private");
@@ -1037,6 +1038,7 @@ struct Context {
   OutputSection<E> *bss = nullptr;
   OutputSection<E> *common = nullptr;
 
+  Symbol<E> *dyld_stub_binder = nullptr;
   Symbol<E> *_objc_msgSend = nullptr;
   Symbol<E> *__mh_execute_header = nullptr;
   Symbol<E> *__dyld_private = nullptr;
