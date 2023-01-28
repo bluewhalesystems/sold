@@ -60,11 +60,12 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
 
   parse_sections(ctx);
 
-  MachHeader &mach_hdr = *(MachHeader *)this->mf->data;
-  if (mach_hdr.flags & MH_SUBSECTIONS_VIA_SYMBOLS)
+  if (MachHeader &mach_hdr = *(MachHeader *)this->mf->data;
+      mach_hdr.flags & MH_SUBSECTIONS_VIA_SYMBOLS) {
     split_subsections_via_symbols(ctx);
-  else
+  } else {
     init_subsections(ctx);
+  }
 
   split_cstring_literals(ctx);
   split_fixed_size_literals(ctx);
@@ -122,6 +123,12 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
   }
 }
 
+static bool always_split(u32 ty) {
+  return ty == S_4BYTE_LITERALS  || ty == S_8BYTE_LITERALS   ||
+         ty == S_16BYTE_LITERALS || ty == S_LITERAL_POINTERS ||
+         ty == S_CSTRING_LITERALS;
+}
+
 template <typename E>
 void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   struct MachSymOff {
@@ -148,13 +155,7 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   // Split each input section
   for (i64 i = 0; i < sections.size(); i++) {
     InputSection<E> *isec = sections[i].get();
-    if (!isec)
-      continue;
-
-    if (u32 ty = isec->hdr.type;
-        ty == S_CSTRING_LITERALS || ty == S_4BYTE_LITERALS ||
-        ty == S_8BYTE_LITERALS || ty == S_16BYTE_LITERALS ||
-        ty == S_LITERAL_POINTERS)
+    if (!isec || always_split(isec->hdr.type))
       continue;
 
     // We start with one big subsection and split it as we process symbols
@@ -206,18 +207,20 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
   subsections.resize(sections.size());
 
   for (i64 i = 0; i < sections.size(); i++) {
-    if (InputSection<E> *isec = sections[i].get()) {
-      Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
-        .input_offset = 0,
-        .input_size = (u32)isec->hdr.size,
-        .input_addr = (u32)isec->hdr.addr,
-        .p2align = (u8)isec->hdr.p2align,
-        .is_alive = !ctx.arg.dead_strip,
-      };
-      subsec_pool.emplace_back(subsec);
-      subsections[i] = subsec;
-    }
+    InputSection<E> *isec = sections[i].get();
+    if (!isec || always_split(isec->hdr.type))
+      continue;
+
+    Subsection<E> *subsec = new Subsection<E>{
+      .isec = *isec,
+      .input_offset = 0,
+      .input_size = (u32)isec->hdr.size,
+      .input_addr = (u32)isec->hdr.addr,
+      .p2align = (u8)isec->hdr.p2align,
+      .is_alive = !ctx.arg.dead_strip,
+    };
+    subsec_pool.emplace_back(subsec);
+    subsections[i] = subsec;
   }
 
   sym_to_subsec.resize(mach_syms.size());
@@ -272,38 +275,38 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
 // Split S_{4,8,16}BYTE_LITERALS sections
 template <typename E>
 void ObjectFile<E>::split_fixed_size_literals(Context<E> &ctx) {
+  auto split = [&](InputSection<E> &isec, u32 size) {
+    if (isec.contents.size() % size)
+      Fatal(ctx) << *this << ": invalid literals section";
+
+    for (i64 pos = 0; pos < isec.contents.size(); pos += size) {
+      Subsection<E> *subsec = new Subsection<E>{
+        .isec = isec,
+        .input_offset = (u32)pos,
+        .input_size = size,
+        .input_addr = (u32)(isec.hdr.addr + pos),
+        .p2align = (u8)std::countr_zero(size),
+        .is_alive = !ctx.arg.dead_strip,
+      };
+
+      subsec_pool.emplace_back(subsec);
+      subsections.push_back(subsec);
+    }
+  };
+
   for (std::unique_ptr<InputSection<E>> &isec : sections) {
     if (!isec)
       continue;
 
-    auto split = [&](u32 size) {
-      if (isec->contents.size() % size)
-        Fatal(ctx) << *this << ": invalid literals section";
-
-      for (i64 pos = 0; pos < isec->contents.size(); pos += size) {
-        Subsection<E> *subsec = new Subsection<E>{
-          .isec = *isec,
-          .input_offset = (u32)pos,
-          .input_size = size,
-          .input_addr = (u32)(isec->hdr.addr + pos),
-          .p2align = (u8)std::countr_zero(size),
-          .is_alive = !ctx.arg.dead_strip,
-        };
-
-        subsec_pool.emplace_back(subsec);
-        subsections.push_back(subsec);
-      }
-    };
-
     switch (isec->hdr.type) {
     case S_4BYTE_LITERALS:
-      split(4);
+      split(*isec, 4);
       break;
     case S_8BYTE_LITERALS:
-      split(8);
+      split(*isec, 8);
       break;
     case S_16BYTE_LITERALS:
-      split(16);
+      split(*isec, 16);
       break;
     }
   }
@@ -313,23 +316,24 @@ void ObjectFile<E>::split_fixed_size_literals(Context<E> &ctx) {
 template <typename E>
 void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
   for (std::unique_ptr<InputSection<E>> &isec : sections) {
-    if (isec && isec->hdr.type == S_LITERAL_POINTERS) {
-      std::string_view str = isec->contents;
-      assert(str.size() % word_size == 0);
+    if (!isec || isec->hdr.type != S_LITERAL_POINTERS)
+      continue;
 
-      for (i64 pos = 0; pos < str.size(); pos += word_size) {
-        Subsection<E> *subsec = new Subsection<E>{
-          .isec = *isec,
-          .input_offset = (u32)pos,
-          .input_size = word_size,
-          .input_addr = (u32)(isec->hdr.addr + pos),
-          .p2align = (u8)std::countr_zero(word_size),
-          .is_alive = !ctx.arg.dead_strip,
-        };
+    std::string_view str = isec->contents;
+    assert(str.size() % word_size == 0);
 
-        subsec_pool.emplace_back(subsec);
-        subsections.push_back(subsec);
-      }
+    for (i64 pos = 0; pos < str.size(); pos += word_size) {
+      Subsection<E> *subsec = new Subsection<E>{
+        .isec = *isec,
+        .input_offset = (u32)pos,
+        .input_size = word_size,
+        .input_addr = (u32)(isec->hdr.addr + pos),
+        .p2align = (u8)std::countr_zero(word_size),
+        .is_alive = !ctx.arg.dead_strip,
+      };
+
+      subsec_pool.emplace_back(subsec);
+      subsections.push_back(subsec);
     }
   }
 }
