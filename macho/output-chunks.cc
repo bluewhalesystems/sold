@@ -1283,11 +1283,18 @@ void CodeSignatureSection<E>::compute_size(Context<E> &ctx) {
                    num_blocks * SHA256_SIZE;
 }
 
-// A __code_signature section is optional for x86 macOS but mandatory
-// for ARM macOS. The section contains a cryptographic hash for each
-// memory page of an executable or a dylib file. The program loader
-// verifies the hash values on the initial execution of a binary and
-// will reject it if a hash value does not match.
+// A __code_signature section contains a digital signature for an output
+// file so that the system can identify who created it.
+//
+// On ARM macOS, __code_signature is mandatory even if we don't have a key
+// to sign. The signature we append in the following function is just
+// SHA256 hashes of each page. Such signature is called the "ad-hoc"
+// signature. Although mandating the ad-hoc signature doesn't make much
+// sense because anyone can compute it, we need to always create it
+// because otherwise the loader will simply rejects our output.
+//
+// On x86-64 macOS, __code_signature is optional. The loader doesn't reject
+// an executable with no signature section.
 template <typename E>
 void CodeSignatureSection<E>::write_signature(Context<E> &ctx) {
   Timer t(ctx, "write_signature");

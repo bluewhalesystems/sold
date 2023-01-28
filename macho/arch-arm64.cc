@@ -13,14 +13,26 @@ static u64 page_offset(u64 hi, u64 lo) {
   return (bits(val, 13, 12) << 29) | (bits(val, 32, 14) << 5);
 }
 
-static void write_ldst(u8 *loc, u32 val) {
+// Write an immediate to an ADD, LDR or STR instruction.
+static void write_add_ldst(u8 *loc, u32 val) {
   u32 insn = *(ul32 *)loc;
   i64 scale = 0;
+
   if ((insn & 0x3b000000) == 0x39000000) {
+    // LDR/STR accesses an aligned 1, 2, 4, 8 or 16 byte data on memory.
+    // The immediate is scaled by the data size, so we need to know the
+    // data size to write a correct immediate.
+    //
+    // The most significant two bits of the instruction usually
+    // specifies the data size.
     scale = bits(insn, 31, 30);
+
+    // Vector and byte LDR/STR shares the same scale bits.
+    // We can distinguish them by looking at other bits.
     if (scale == 0 && (insn & 0x04800000) == 0x04800000)
       scale = 4;
   }
+
   *(ul32 *)loc |= bits(val, 11, scale) << 10;
 }
 
@@ -270,13 +282,13 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       *(ul32 *)loc |= page_offset(S + A, P);
       break;
     case ARM64_RELOC_PAGEOFF12:
-      write_ldst(loc, S + A);
+      write_add_ldst(loc, S + A);
       break;
     case ARM64_RELOC_GOT_LOAD_PAGE21:
       *(ul32 *)loc |= page_offset(G + GOT + A, P);
       break;
     case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
-      write_ldst(loc, G + GOT + A);
+      write_add_ldst(loc, G + GOT + A);
       break;
     case ARM64_RELOC_POINTER_TO_GOT:
       ASSERT(r.size == 4);
@@ -286,7 +298,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       *(ul32 *)loc |= page_offset(r.sym->get_tlv_addr(ctx) + A, P);
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
-      write_ldst(loc, r.sym->get_tlv_addr(ctx) + A);
+      write_add_ldst(loc, r.sym->get_tlv_addr(ctx) + A);
       break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
