@@ -433,11 +433,7 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
   Timer t(ctx, "uniquify_cstrings " + std::string(osec.hdr.get_sectname()));
 
   struct Entry {
-    Entry(Subsection<E> *subsec) : owner(subsec) {}
-    Entry(const Entry &other) = default;
-
     Atomic<Subsection<E> *> owner = nullptr;
-    Atomic<u8> p2align = 0;
   };
 
   struct SubsecRef {
@@ -466,7 +462,7 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
   // Create a hash map large enough to hold all strings.
   ConcurrentMap<Entry> map(estimator.get_cardinality() * 3 / 2);
 
-  // Insert all strings into the hash table.
+  // Insert all strings into the hash table to uniquify.
   tbb::parallel_for_each(vec, [&](SubsecRef &ref) {
     if (!ref.subsec)
       return;
@@ -478,8 +474,6 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
     while (existing->isec.file.priority < ref.subsec->isec.file.priority &&
            !ref.ent->owner.compare_exchange_weak(existing, ref.subsec,
                                                  std::memory_order_relaxed));
-
-    update_maximum(ref.ent->p2align, ref.subsec->p2align.load());
   });
 
   // Decide who will become the owner for each subsection.
