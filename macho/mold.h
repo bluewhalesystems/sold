@@ -169,6 +169,7 @@ private:
   void split_subsections_via_symbols(Context<E> &ctx);
   void init_subsections(Context<E> &ctx);
   void split_cstring_literals(Context<E> &ctx);
+  void split_fixed_size_literals(Context<E> &ctx);
   void split_literal_pointers(Context<E> &ctx);
   InputSection<E> *get_common_sec(Context<E> &ctx);
   void parse_lto_symbols(Context<E> &ctx);

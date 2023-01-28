@@ -427,10 +427,10 @@ static void create_synthetic_chunks(Context<E> &ctx) {
     sort(seg->chunks, compare_chunks<E>);
 }
 
-// Split S_CSTRING_LITERALS subsections by contents.
+// Merge S_CSTRING_LITERALS or S_{4,8,16}BYTE_LITERALS subsections by contents.
 template <typename E>
-static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
-  Timer t(ctx, "uniquify_cstrings " + std::string(osec.hdr.get_sectname()));
+static void uniquify_literals(Context<E> &ctx, OutputSection<E> &osec) {
+  Timer t(ctx, "uniquify_literals " + std::string(osec.hdr.get_sectname()));
 
   struct Entry {
     Atomic<Subsection<E> *> owner = nullptr;
@@ -467,8 +467,8 @@ static void uniquify_cstrings(Context<E> &ctx, OutputSection<E> &osec) {
     if (!ref.subsec)
       return;
 
-    std::string_view s = ref.subsec->get_contents();
-    ref.ent = map.insert(s, ref.hash, {ref.subsec}).first;
+    std::string_view key = ref.subsec->get_contents();
+    ref.ent = map.insert(key, ref.hash, {ref.subsec}).first;
 
     Subsection<E> *existing = ref.ent->owner;
     while (existing->isec.file.priority < ref.subsec->isec.file.priority &&
@@ -530,10 +530,18 @@ template <typename E>
 static void merge_mergeable_sections(Context<E> &ctx) {
   Timer t(ctx, "merge_mergeable_sections");
 
-  for (Chunk<E> *chunk : ctx.chunks)
-    if (OutputSection<E> *osec = chunk->to_osec())
-      if (chunk->hdr.type == S_CSTRING_LITERALS)
-        uniquify_cstrings(ctx, *osec);
+  for (Chunk<E> *chunk : ctx.chunks) {
+    if (OutputSection<E> *osec = chunk->to_osec()) {
+      switch (chunk->hdr.type) {
+      case S_CSTRING_LITERALS:
+      case S_4BYTE_LITERALS:
+      case S_8BYTE_LITERALS:
+      case S_16BYTE_LITERALS:
+        uniquify_literals(ctx, *osec);
+        break;
+      }
+    }
+  }
 
   for (Chunk<E> *chunk : ctx.chunks)
     if (OutputSection<E> *osec = chunk->to_osec())

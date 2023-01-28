@@ -67,6 +67,7 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
     init_subsections(ctx);
 
   split_cstring_literals(ctx);
+  split_fixed_size_literals(ctx);
   split_literal_pointers(ctx);
 
   sort(subsections, [](Subsection<E> *a, Subsection<E> *b) {
@@ -147,8 +148,13 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   // Split each input section
   for (i64 i = 0; i < sections.size(); i++) {
     InputSection<E> *isec = sections[i].get();
-    if (!isec || isec->hdr.type == S_CSTRING_LITERALS ||
-        isec->hdr.type == S_LITERAL_POINTERS)
+    if (!isec)
+      continue;
+
+    if (u32 ty = isec->hdr.type;
+        ty == S_CSTRING_LITERALS || ty == S_4BYTE_LITERALS ||
+        ty == S_8BYTE_LITERALS || ty == S_16BYTE_LITERALS ||
+        ty == S_LITERAL_POINTERS)
       continue;
 
     // We start with one big subsection and split it as we process symbols
@@ -259,6 +265,46 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
       subsec_pool.emplace_back(subsec);
       subsections.push_back(subsec);
       pos = end + 1;
+    }
+  }
+}
+
+// Split S_{4,8,16}BYTE_LITERALS sections
+template <typename E>
+void ObjectFile<E>::split_fixed_size_literals(Context<E> &ctx) {
+  for (std::unique_ptr<InputSection<E>> &isec : sections) {
+    if (!isec)
+      continue;
+
+    auto split = [&](u32 size) {
+      if (isec->contents.size() % size)
+        Fatal(ctx) << *this << ": invalid literals section";
+
+      for (i64 pos = 0; pos < isec->contents.size(); pos += size) {
+        Subsection<E> *subsec = new Subsection<E>{
+          .isec = *isec,
+          .input_offset = (u32)pos,
+          .input_size = size,
+          .input_addr = (u32)(isec->hdr.addr + pos),
+          .p2align = (u8)std::countr_zero(size),
+          .is_alive = !ctx.arg.dead_strip,
+        };
+
+        subsec_pool.emplace_back(subsec);
+        subsections.push_back(subsec);
+      }
+    };
+
+    switch (isec->hdr.type) {
+    case S_4BYTE_LITERALS:
+      split(4);
+      break;
+    case S_8BYTE_LITERALS:
+      split(8);
+      break;
+    case S_16BYTE_LITERALS:
+      split(16);
+      break;
     }
   }
 }
