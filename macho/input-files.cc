@@ -90,10 +90,10 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
     return;
 
   MachSection *mach_sec = (MachSection *)((u8 *)cmd + sizeof(*cmd));
+  sections.resize(cmd->nsects);
 
   for (i64 i = 0; i < cmd->nsects; i++) {
     MachSection &msec = mach_sec[i];
-    sections.push_back(nullptr);
 
     if (msec.match("__LD", "__compact_unwind")) {
       unwind_sec = &msec;
@@ -117,7 +117,7 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
     if (msec.attr & S_ATTR_DEBUG)
       continue;
 
-    sections.back().reset(new InputSection<E>(ctx, *this, msec, i));
+    sections[i].reset(new InputSection<E>(ctx, *this, msec, i));
   }
 }
 
