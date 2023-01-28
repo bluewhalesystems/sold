@@ -197,10 +197,13 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
         *(ul64 *)loc = S + A;
       break;
     case X86_64_RELOC_SUBTRACTOR:
-      ASSERT(r.size == 4);
+      ASSERT(r.size == 4 || r.size == 8);
       i++;
       ASSERT(rels[i].type == X86_64_RELOC_UNSIGNED);
-      *(ul32 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
+      if (r.size == 4)
+        *(ul32 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
+      else
+        *(ul64 *)loc = rels[i].get_addr(ctx) + rels[i].addend - S;
       break;
     case X86_64_RELOC_SIGNED:
     case X86_64_RELOC_SIGNED_1:
