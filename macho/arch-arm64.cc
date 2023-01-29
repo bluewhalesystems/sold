@@ -40,7 +40,7 @@ template <>
 void StubsSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
 
-  for (i64 i = 0; i < syms.size(); i++) {
+  for (i64 i = 0, j = 0; i < syms.size(); i++) {
     static const ul32 insn[] = {
       0x90000010, // adrp x16, $ptr@PAGE
       0xf9400210, // ldr  x16, [x16, $ptr@PAGEOFF]
@@ -49,12 +49,17 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
 
     static_assert(sizeof(insn) == E::stub_size);
 
-    u64 la_addr = ctx.lazy_symbol_ptr.hdr.addr + word_size * i;
     u64 this_addr = this->hdr.addr + E::stub_size * i;
 
+    u64 ptr_addr;
+    if (syms[i]->has_got())
+      ptr_addr = syms[i]->get_got_addr(ctx);
+    else
+      ptr_addr = ctx.lazy_symbol_ptr.hdr.addr + word_size * j++;
+
     memcpy(buf, insn, sizeof(insn));
-    buf[0] |= page_offset(la_addr, this_addr);
-    buf[1] |= bits(la_addr, 11, 3) << 10;
+    buf[0] |= page_offset(ptr_addr, this_addr);
+    buf[1] |= bits(ptr_addr, 11, 3) << 10;
     buf += 3;
   }
 }
@@ -88,7 +93,10 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 
   buf += 6;
 
-  for (i64 i = 0; i < ctx.stubs.syms.size(); i++) {
+  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms) {
+    if (sym->has_got())
+      continue;
+
     static const ul32 insn[] = {
       0x18000050, // ldr  w16, addr
       0x14000000, // b    stubHelperHeader
@@ -99,8 +107,9 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 
     memcpy(buf, insn, sizeof(insn));
     buf[1] |= bits((start - buf - 1) * 4, 27, 2);
-    buf[2] = ctx.stubs.bind_offsets[i];
+    buf[2] = ctx.lazy_bind.bind_offsets[i];
     buf += 3;
+    i++;
   }
 }
 

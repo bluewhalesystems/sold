@@ -644,7 +644,8 @@ static std::vector<u8> encode_rebase_entries(std::vector<RebaseEntry> &rebases) 
     RebaseEntry *last = (i == 0) ? nullptr : &rebases[i - 1];
 
     // Write a segment index and an offset
-    if (!last || last->seg_idx != cur.seg_idx) {
+    if (!last || last->seg_idx != cur.seg_idx ||
+        cur.offset - last->offset - 8 < 0) {
       buf.push_back(REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | cur.seg_idx);
       encode_uleb(buf, cur.offset);
     } else {
@@ -729,10 +730,11 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
 
   std::vector<RebaseEntry> rebases = flatten(vec);
 
-  for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
-    rebases.emplace_back(ctx.data_seg->seg_idx,
-                         ctx.lazy_symbol_ptr.hdr.addr + i * word_size -
-                         ctx.data_seg->cmd.vmaddr);
+  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms)
+    if (!sym->has_got())
+      rebases.emplace_back(ctx.data_seg->seg_idx,
+                           ctx.lazy_symbol_ptr.hdr.addr + i++ * word_size -
+                           ctx.data_seg->cmd.vmaddr);
 
   for (Symbol<E> *sym : ctx.got.syms)
     if (!sym->is_imported)
@@ -872,7 +874,7 @@ void BindSection<E>::copy_buf(Context<E> &ctx) {
 }
 
 template <typename E>
-void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym) {
+void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym, i64 idx) {
   auto emit = [&](u8 byte) {
     contents.push_back(byte);
   };
@@ -899,7 +901,7 @@ void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym) {
   i64 seg_idx = ctx.data_seg->seg_idx;
   emit(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | seg_idx);
 
-  i64 offset = ctx.lazy_symbol_ptr.hdr.addr + sym.stub_idx * word_size -
+  i64 offset = ctx.lazy_symbol_ptr.hdr.addr + idx * word_size -
                ctx.data_seg->cmd.vmaddr;
   encode_uleb(contents, offset);
 
@@ -909,11 +911,13 @@ void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym) {
 
 template <typename E>
 void LazyBindSection<E>::compute_size(Context<E> &ctx) {
-  ctx.stubs.bind_offsets.clear();
+  bind_offsets.clear();
 
-  for (Symbol<E> *sym : ctx.stubs.syms) {
-    ctx.stubs.bind_offsets.push_back(contents.size());
-    add(ctx, *sym);
+  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms) {
+    if (!sym->has_got()) {
+      bind_offsets.push_back(contents.size());
+      add(ctx, *sym, i++);
+    }
   }
 
   contents.resize(align_to(contents.size(), 1 << this->hdr.p2align));
@@ -1213,10 +1217,14 @@ void IndirectSymtabSection<E>::compute_size(Context<E> &ctx) {
   n += ctx.thread_ptrs.syms.size();
 
   ctx.stubs.hdr.reserved1 = n;
-  n += ctx.stubs.syms.size();
+  for (Symbol<E> *sym : ctx.stubs.syms)
+    if (!sym->has_got())
+      n++;
 
   ctx.lazy_symbol_ptr.hdr.reserved1 = n;
-  n += ctx.stubs.syms.size();
+  for (Symbol<E> *sym : ctx.stubs.syms)
+    if (!sym->has_got())
+      n++;
 
   this->hdr.size = n * ENTRY_SIZE;
 }
@@ -1232,10 +1240,12 @@ void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
     *buf++ = sym->output_symtab_idx;
 
   for (Symbol<E> *sym : ctx.stubs.syms)
-    *buf++ = sym->output_symtab_idx;
+    if (!sym->has_got())
+      *buf++ = sym->output_symtab_idx;
 
   for (Symbol<E> *sym : ctx.stubs.syms)
-    *buf++ = sym->output_symtab_idx;
+    if (!sym->has_got())
+      *buf++ = sym->output_symtab_idx;
 }
 
 // Create __DATA,__objc_imageinfo section contents by merging input
@@ -1450,13 +1460,15 @@ void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
   sym->stub_idx = syms.size();
 
   syms.push_back(sym);
+  this->hdr.size = syms.size() * E::stub_size;
 
-  i64 nsyms = syms.size();
-  this->hdr.size = nsyms * E::stub_size;
+  if (!sym->has_got()) {
+    if (ctx.stub_helper.hdr.size == 0)
+      ctx.stub_helper.hdr.size = E::stub_helper_hdr_size;
 
-  ctx.stub_helper.hdr.size =
-    E::stub_helper_hdr_size + nsyms * E::stub_helper_size;
-  ctx.lazy_symbol_ptr.hdr.size = nsyms * word_size;
+    ctx.stub_helper.hdr.size += E::stub_helper_size;
+    ctx.lazy_symbol_ptr.hdr.size += word_size;
+  }
 }
 
 template <typename E>
@@ -1653,9 +1665,10 @@ template <typename E>
 void LazySymbolPtrSection<E>::copy_buf(Context<E> &ctx) {
   u64 *buf = (u64 *)(ctx.buf + this->hdr.offset);
 
-  for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
-    buf[i] = ctx.stub_helper.hdr.addr + E::stub_helper_hdr_size +
-             i * E::stub_helper_size;
+  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms)
+    if (!sym->has_got())
+      *buf++ = ctx.stub_helper.hdr.addr + E::stub_helper_hdr_size +
+               i++ * E::stub_helper_size;
 }
 
 template <typename E>

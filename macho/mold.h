@@ -343,6 +343,8 @@ struct Symbol {
   inline u64 get_addr(Context<E> &ctx) const;
   inline u64 get_got_addr(Context<E> &ctx) const;
   inline u64 get_tlv_addr(Context<E> &ctx) const;
+
+  bool has_got() const { return got_idx != -1; }
 };
 
 template <typename E>
@@ -509,11 +511,12 @@ public:
     this->hdr.p2align = 3;
   }
 
-  void add(Context<E> &ctx, Symbol<E> &sym);
+  void add(Context<E> &ctx, Symbol<E> &sym, i64 idx);
 
   void compute_size(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
 
+  std::vector<u32> bind_offsets;
   std::vector<u8> contents;
 };
 
@@ -696,7 +699,6 @@ public:
   void copy_buf(Context<E> &ctx) override;
 
   std::vector<Symbol<E> *> syms;
-  std::vector<u32> bind_offsets;
 };
 
 template <typename E>
@@ -916,6 +918,7 @@ struct Context {
     bool ObjC = false;
     bool adhoc_codesign = is_arm<E>;
     bool application_extension = false;
+    bool bind_at_load = false;
     bool color_diagnostics = false;
     bool dead_strip = false;
     bool dead_strip_dylibs = false;
