@@ -55,7 +55,7 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
     if (syms[i]->has_got())
       ptr_addr = syms[i]->get_got_addr(ctx);
     else
-      ptr_addr = ctx.lazy_symbol_ptr.hdr.addr + word_size * j++;
+      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + word_size * j++;
 
     memcpy(buf, insn, sizeof(insn));
     buf[0] |= page_offset(ptr_addr, this_addr);
@@ -107,7 +107,7 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 
     memcpy(buf, insn, sizeof(insn));
     buf[1] |= bits((start - buf - 1) * 4, 27, 2);
-    buf[2] = ctx.lazy_bind.bind_offsets[i];
+    buf[2] = ctx.lazy_bind->bind_offsets[i];
     buf += 3;
     i++;
   }
@@ -187,6 +187,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
+    rel.is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR);
 
     // A relocation refers to either a symbol or a section
     if (r.is_extern) {

@@ -50,13 +50,14 @@ struct Relocation {
   u32 offset = 0;
   u8 type = -1;
   u8 size = 0;
+  bool is_subtracted : 1 = false;
   i64 addend = 0;
   Symbol<E> *sym = nullptr;
   Subsection<E> *subsec = nullptr;
 
   // For range extension thunks
-  i32 thunk_idx = -1;
-  i32 thunk_sym_idx = -1;
+  i16 thunk_idx = -1;
+  i16 thunk_sym_idx = -1;
 };
 
 template <typename E>
@@ -333,9 +334,16 @@ struct Symbol {
   bool no_dead_strip : 1 = false;
   bool referenced_dynamically : 1 = false;
 
-  // For range extension thunks
-  i32 thunk_idx = -1;
-  i32 thunk_sym_idx = -1;
+  union {
+    // For range extension thunks. Used by OutputSection::compute_size().
+    struct {
+      i16 thunk_idx = -1;
+      i16 thunk_sym_idx = -1;
+    };
+
+    // For chained fixups. Used by ChainedFixupsSection.
+    i32 fixup_ordinal;
+  };
 
   // For symtab
   i32 output_symtab_idx = -1;
@@ -685,6 +693,43 @@ public:
 };
 
 template <typename E>
+struct Fixup {
+  u64 addr;
+  Symbol<E> *sym = nullptr;
+  u64 addend = 0;
+};
+
+template <typename E>
+struct SymbolAddend {
+  bool operator==(const SymbolAddend &) const = default;
+
+  Symbol<E> *sym = nullptr;
+  u64 addend = 0;
+};
+
+template <typename E>
+class ChainedFixupsSection : public Chunk<E> {
+public:
+  ChainedFixupsSection(Context<E> &ctx)
+    : Chunk<E>(ctx, "__LINKEDIT", "__chainfixups") {
+    this->is_hidden = true;
+    this->hdr.p2align = 3;
+  }
+
+  void compute_size(Context<E> &ctx) override;
+  void copy_buf(Context<E> &ctx) override;
+  void write_fixup_chains(Context<E> &ctx);
+
+private:
+  u8 *allocate(i64 size);
+  template <typename T> void write_imports(Context<E> &ctx);
+
+  std::vector<Fixup<E>> fixups;
+  std::vector<SymbolAddend<E>> dynsyms;
+  std::vector<u8> contents;
+};
+
+template <typename E>
 class StubsSection : public Chunk<E> {
 public:
   StubsSection(Context<E> &ctx) : Chunk<E>(ctx, "__TEXT", "__stubs") {
@@ -927,6 +972,7 @@ struct Context {
     bool dynamic = true;
     bool export_dynamic = false;
     bool fatal_warnings = false;
+    bool fixup_chains = false;
     bool function_starts = true;
     bool mark_dead_strippable_dylib = false;
     bool noinhibit_exec = false;
@@ -1018,20 +1064,22 @@ struct Context {
 
   OutputMachHeader<E> mach_hdr{*this};
   StubsSection<E> stubs{*this};
-  StubHelperSection<E> stub_helper{*this};
   UnwindInfoSection<E> unwind_info{*this};
   GotSection<E> got{*this};
-  LazySymbolPtrSection<E> lazy_symbol_ptr{*this};
   DataInCodeSection<E> data_in_code{*this};
   ThreadPtrsSection<E> thread_ptrs{*this};
-  RebaseSection<E> rebase{*this};
-  BindSection<E> bind{*this};
-  LazyBindSection<E> lazy_bind{*this};
   ExportSection<E> export_{*this};
   SymtabSection<E> symtab{*this};
   StrtabSection<E> strtab{*this};
   IndirectSymtabSection<E> indir_symtab{*this};
 
+  std::unique_ptr<StubHelperSection<E>> stub_helper;
+  std::unique_ptr<LazySymbolPtrSection<E>> lazy_symbol_ptr;
+  std::unique_ptr<LazyBindSection<E>> lazy_bind;
+  std::unique_ptr<RebaseSection<E>> rebase;
+  std::unique_ptr<BindSection<E>> bind;
+
+  std::unique_ptr<ChainedFixupsSection<E>> chained_fixups;
   std::unique_ptr<FunctionStartsSection<E>> function_starts;
   std::unique_ptr<ObjcImageInfoSection<E>> image_info;
   std::unique_ptr<CodeSignatureSection<E>> code_sig;

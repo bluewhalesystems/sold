@@ -355,6 +355,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_flag("-debug_variant")) {
     } else if (read_flag("-demangle")) {
       ctx.arg.demangle = true;
+    } else if (read_flag("-no_demangle")) {
+      ctx.arg.demangle = false;
     } else if (read_arg("-dependency_info")) {
       ctx.arg.dependency_info = arg;
     } else if (read_flag("-dylib")) {
@@ -387,6 +389,10 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       remaining.push_back(std::string(arg));
     } else if (read_arg("-final_output")) {
       ctx.arg.final_output = arg;
+    } else if (read_flag("-fixup_chains")) {
+      ctx.arg.fixup_chains = true;
+    } else if (read_flag("-no_fixup_chains")) {
+      ctx.arg.fixup_chains = false;
     } else if (read_arg("-force_load")) {
       remaining.push_back("-force_load");
       remaining.push_back(std::string(arg));

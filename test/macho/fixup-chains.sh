@@ -3,17 +3,13 @@
 
 cat <<EOF | $CC -o $t/a.o -c -xc -
 #include <stdio.h>
-void hello() {
-  printf("Hello world\n");
-}
+void hello() { printf("Hello world\n"); }
 EOF
 
 cat <<EOF | $CC -o $t/b.o -c -xc -
-void hello();
-int main() {
-  hello();
-}
+void *hello();
+int main() { hello(); }
 EOF
 
-$CC -o $t/exe $t/a.o $t/b.o -Wl,-fixup_chains
+$CC --ld-path=./ld64 -o $t/exe $t/a.o $t/b.o -Wl,-fixup_chains
 $t/exe | grep -q 'Hello world'

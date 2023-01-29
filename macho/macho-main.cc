@@ -261,6 +261,7 @@ static bool compare_chunks(const Chunk<E> *a, const Chunk<E> *b) {
     "__binding",
     "__weak_binding",
     "__lazy_binding",
+    "__chainfixups",
     "__export",
     "__func_starts",
     "__data_in_code",
@@ -374,6 +375,17 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
 template <typename E>
 static void create_synthetic_chunks(Context<E> &ctx) {
   Timer t(ctx, "create_synthetic_chunks");
+
+  // Create symbol import tables.
+  if (ctx.arg.fixup_chains) {
+    ctx.chained_fixups.reset(new ChainedFixupsSection<E>(ctx));
+  } else {
+    ctx.rebase.reset(new RebaseSection<E>(ctx));
+    ctx.bind.reset(new BindSection<E>(ctx));
+    ctx.stub_helper.reset(new StubHelperSection<E>(ctx));
+    ctx.lazy_symbol_ptr.reset(new LazySymbolPtrSection<E>(ctx));
+    ctx.lazy_bind.reset(new LazyBindSection<E>(ctx));
+  }
 
   // Create a __DATA,__objc_imageinfo section.
   ctx.image_info = ObjcImageInfoSection<E>::create(ctx);
@@ -598,7 +610,8 @@ template <typename E>
 static void export_symbols(Context<E> &ctx) {
   Timer t(ctx, "export_symbols");
 
-  ctx.got.add(ctx, get_symbol(ctx, "dyld_stub_binder"));
+  if (ctx.stub_helper)
+    ctx.got.add(ctx, get_symbol(ctx, "dyld_stub_binder"));
 
   std::vector<InputFile<E> *> files;
   append(files, ctx.objs);
@@ -618,13 +631,14 @@ static void export_symbols(Context<E> &ctx) {
         ctx.got.add(ctx, sym);
 
       if (sym->flags & NEEDS_STUB) {
-        if (ctx.arg.bind_at_load)
+        if (ctx.arg.bind_at_load || ctx.arg.fixup_chains)
           ctx.got.add(ctx, sym);
         ctx.stubs.add(ctx, sym);
       }
 
       if (sym->flags & NEEDS_THREAD_PTR)
         ctx.thread_ptrs.add(ctx, sym);
+
       sym->flags = 0;
     }
   }
@@ -1199,6 +1213,9 @@ int macho_main(int argc, char **argv) {
   ctx.buf = ctx.output_file->buf;
 
   copy_sections_to_output_file(ctx);
+
+  if (ctx.chained_fixups)
+    ctx.chained_fixups->write_fixup_chains(ctx);
 
   if (ctx.code_sig)
     ctx.code_sig->write_signature(ctx);

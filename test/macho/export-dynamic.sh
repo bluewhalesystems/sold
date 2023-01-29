@@ -13,12 +13,12 @@ int main() {
 }
 EOF
 
-$CC --ld-path=./ld64 -o $t/exe1 $t/a.o -flto
+$CC --ld-path=./ld64 -o $t/exe1 $t/a.o -flto -Wl,-no_fixup_chains
 $t/exe1 | grep -q 'Hello world'
 nm -dyldinfo-only $t/exe1 > $t/log1
 ! grep -q _hello $t/log1 || false
 
-$CC --ld-path=./ld64 -o $t/exe2 $t/a.o -flto -Wl,-export_dynamic
+$CC --ld-path=./ld64 -o $t/exe2 $t/a.o -flto -Wl,-no_fixup_chains -Wl,-export_dynamic
 $t/exe2 | grep -q 'Hello world'
 nm -dyldinfo-only $t/exe2 > $t/log2
 grep -q _hello $t/log2

@@ -44,7 +44,9 @@ static void collect_root_set(Context<E> &ctx,
       add(sym);
 
   add(ctx.arg.entry);
-  add(get_symbol(ctx, "dyld_stub_binder"));
+
+  if (ctx.stub_helper)
+    add(get_symbol(ctx, "dyld_stub_binder"));
 }
 
 template <typename E>

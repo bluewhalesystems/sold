@@ -815,6 +815,91 @@ struct ObjcImageInfo {
   ul16 swift_lang_version = 0;
 };
 
+// __LINKEDIT,__chainfixups
+struct DyldChainedFixupsHeader {
+  ul32 fixups_version;
+  ul32 starts_offset;
+  ul32 imports_offset;
+  ul32 symbols_offset;
+  ul32 imports_count;
+  ul32 imports_format;
+  ul32 symbols_format;
+};
+
+struct DyldChainedStartsInImage {
+  ul32 seg_count;
+  ul32 seg_info_offset[];
+};
+
+struct DyldChainedStartsInSegment {
+  ul32 size;
+  ul16 page_size;
+  ul16 pointer_format;
+  ul64 segment_offset;
+  ul32 max_valid_pointer;
+  ul16 page_count;
+  ul16 page_start[];
+};
+
+struct DyldChainedPtr64Rebase {
+  u64 target   : 36;
+  u64 high8    :  8;
+  u64 reserved :  7;
+  u64 next     : 12;
+  u64 bind     :  1;
+};
+
+struct DyldChainedPtr64Bind {
+  u64 ordinal  : 24;
+  u64 addend   :  8;
+  u64 reserved : 19;
+  u64 next     : 12;
+  u64 bind     :  1;
+};
+
+struct DyldChainedImport {
+  u32 lib_ordinal :  8;
+  u32 weak_import :  1;
+  u32 name_offset : 23;
+};
+
+struct DyldChainedImportAddend {
+  u32 lib_ordinal :  8;
+  u32 weak_import :  1;
+  u32 name_offset : 23;
+  u32 addend;
+};
+
+struct DyldChainedImportAddend64 {
+  u64 lib_ordinal : 16;
+  u64 weak_import :  1;
+  u64 reserved    : 15;
+  u64 name_offset : 32;
+  u64 addend;
+};
+
+enum : u32 {
+  DYLD_CHAINED_PTR_ARM64E = 1,
+  DYLD_CHAINED_PTR_64 = 2,
+  DYLD_CHAINED_PTR_32 = 3,
+  DYLD_CHAINED_PTR_32_CACHE = 4,
+  DYLD_CHAINED_PTR_32_FIRMWARE = 5,
+};
+
+enum : u32 {
+  DYLD_CHAINED_PTR_START_NONE = 0xFFFF,
+  DYLD_CHAINED_PTR_START_MULTI = 0x8000,
+  DYLD_CHAINED_PTR_START_LAST = 0x8000,
+};
+
+enum : u32 {
+  DYLD_CHAINED_IMPORT = 1,
+  DYLD_CHAINED_IMPORT_ADDEND = 2,
+  DYLD_CHAINED_IMPORT_ADDEND64 = 3,
+  DYLD_CHAINED_PTR_64_OFFSET = 6,
+  DYLD_CHAINED_PTR_ARM64E_OFFSET = 7,
+};
+
 struct ARM64 {
   static constexpr u32 cputype = CPU_TYPE_ARM64;
   static constexpr u32 cpusubtype = CPU_SUBTYPE_ARM64_ALL;

@@ -23,7 +23,7 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
     if (syms[i]->has_got())
       ptr_addr = syms[i]->get_got_addr(ctx);
     else
-      ptr_addr = ctx.lazy_symbol_ptr.hdr.addr + word_size * j++;
+      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + word_size * j++;
 
     *(ul32 *)(buf + 2) = ptr_addr - this_addr - 6;
     buf += sizeof(insn);
@@ -63,7 +63,7 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
     static_assert(sizeof(insn) == E::stub_helper_size);
 
     memcpy(buf, insn, sizeof(insn));
-    *(ul32 *)(buf + 1) = ctx.lazy_bind.bind_offsets[i];
+    *(ul32 *)(buf + 1) = ctx.lazy_bind->bind_offsets[i];
     *(ul32 *)(buf + 6) = start - buf - 10;
     buf += sizeof(insn);
     i++;
@@ -129,6 +129,8 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
     vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
 
     Relocation<E> &rel = vec.back();
+    rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
+
     i64 addend = read_addend(file.mf->data + hdr.offset, r) +
                  get_reloc_addend(r.type);
 

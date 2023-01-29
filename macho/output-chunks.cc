@@ -39,19 +39,19 @@ static std::vector<u8> create_dyld_info_only_cmd(Context<E> &ctx) {
   cmd.cmd = LC_DYLD_INFO_ONLY;
   cmd.cmdsize = buf.size();
 
-  if (ctx.rebase.hdr.size) {
-    cmd.rebase_off = ctx.rebase.hdr.offset;
-    cmd.rebase_size = ctx.rebase.hdr.size;
+  if (ctx.rebase && ctx.rebase->hdr.size) {
+    cmd.rebase_off = ctx.rebase->hdr.offset;
+    cmd.rebase_size = ctx.rebase->hdr.size;
   }
 
-  if (ctx.bind.hdr.size) {
-    cmd.bind_off = ctx.bind.hdr.offset;
-    cmd.bind_size = ctx.bind.hdr.size;
+  if (ctx.bind && ctx.bind->hdr.size) {
+    cmd.bind_off = ctx.bind->hdr.offset;
+    cmd.bind_size = ctx.bind->hdr.size;
   }
 
-  if (ctx.lazy_bind.hdr.size) {
-    cmd.lazy_bind_off = ctx.lazy_bind.hdr.offset;
-    cmd.lazy_bind_size = ctx.lazy_bind.hdr.size;
+  if (ctx.lazy_bind && ctx.lazy_bind->hdr.size) {
+    cmd.lazy_bind_off = ctx.lazy_bind->hdr.offset;
+    cmd.lazy_bind_size = ctx.lazy_bind->hdr.size;
   }
 
   if (ctx.export_.hdr.size) {
@@ -222,6 +222,30 @@ static std::vector<u8> create_data_in_code_cmd(Context<E> &ctx) {
 }
 
 template <typename E>
+static std::vector<u8> create_dyld_chained_fixups(Context<E> &ctx) {
+  std::vector<u8> buf(sizeof(LinkEditDataCommand));
+  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
+
+  cmd.cmd = LC_DYLD_CHAINED_FIXUPS;
+  cmd.cmdsize = buf.size();
+  cmd.dataoff = ctx.chained_fixups->hdr.offset;
+  cmd.datasize = ctx.chained_fixups->hdr.size;
+  return buf;
+}
+
+template <typename E>
+static std::vector<u8> create_dyld_exports_trie(Context<E> &ctx) {
+  std::vector<u8> buf(sizeof(LinkEditDataCommand));
+  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
+
+  cmd.cmd = LC_DYLD_EXPORTS_TRIE;
+  cmd.cmdsize = buf.size();
+  cmd.dataoff = ctx.export_.hdr.offset;
+  cmd.datasize = ctx.export_.hdr.size;
+  return buf;
+}
+
+template <typename E>
 static std::vector<u8> create_sub_framework_cmd(Context<E> &ctx) {
   i64 size = sizeof(UmbrellaCommand) + ctx.arg.umbrella.size() + 1;
   std::vector<u8> buf(align_to(size, 8));
@@ -294,13 +318,23 @@ static std::vector<std::vector<u8>> create_load_commands(Context<E> &ctx) {
     }
   }
 
-  vec.push_back(create_dyld_info_only_cmd(ctx));
+  if (ctx.chained_fixups && ctx.chained_fixups->hdr.size) {
+    vec.push_back(create_dyld_chained_fixups(ctx));
+    if (ctx.export_.hdr.size)
+      vec.push_back(create_dyld_exports_trie(ctx));
+  } else {
+    vec.push_back(create_dyld_info_only_cmd(ctx));
+  }
+
   vec.push_back(create_symtab_cmd(ctx));
   vec.push_back(create_dysymtab_cmd(ctx));
+
   if (ctx.arg.uuid != UUID_NONE)
     vec.push_back(create_uuid_cmd(ctx));
+
   vec.push_back(create_build_version_cmd(ctx));
   vec.push_back(create_source_version_cmd(ctx));
+
   if (ctx.arg.function_starts)
     vec.push_back(create_function_starts_cmd(ctx));
 
@@ -684,33 +718,30 @@ static std::vector<u8> encode_rebase_entries(std::vector<RebaseEntry> &rebases) 
 }
 
 template <typename E>
+static bool needs_rebasing(const Relocation<E> &r) {
+  // Rebase only ARM64_RELOC_UNSIGNED or X86_64_RELOC_UNSIGNED relocs.
+  if (r.type != E::abs_rel)
+    return false;
+
+  // If the reloc specifies the relative address between two relocations,
+  // we don't need a rebase reloc.
+  if (r.is_subtracted)
+    return false;
+
+  // If we have a dynamic reloc, we don't need to rebase it.
+  if (r.sym && r.sym->is_imported)
+    return false;
+
+  // If it refers a TLS block, it's already relative to the thread
+  // pointer, so it doesn't have to be adjusted to the loaded address.
+  if (r.refers_tls())
+    return false;
+
+  return true;
+}
+
+template <typename E>
 inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
-  auto needs_rebasing = [](std::span<Relocation<E>> rels, i64 idx) {
-    Relocation<E> &r = rels[idx];
-
-    // Rebase only ARM64_RELOC_UNSIGNED or X86_64_RELOC_UNSIGNED relocs.
-    if (r.type != E::abs_rel)
-      return false;
-
-    // If the reloc specifies the relative address between two relocations,
-    // we don't need a rebase reloc.
-    if (idx > 0 && rels[idx - 1].type == E::subtractor_rel)
-      return false;
-
-    // If we have a dynamic reloc, we don't need to rebase it.
-    if (r.sym && r.sym->is_imported)
-      return false;
-
-    // If it refers a TLS block, it's already relative to the thread
-    // pointer, so it doesn't have to be adjusted to the loaded address.
-    if (r.sym && r.sym->subsec)
-      if (auto ty = r.sym->subsec->isec.osec.hdr.type;
-          ty == S_THREAD_LOCAL_REGULAR || ty == S_THREAD_LOCAL_ZEROFILL)
-        return false;
-
-    return true;
-  };
-
   std::vector<std::vector<RebaseEntry>> vec(ctx.objs.size());
 
   tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
@@ -722,9 +753,9 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
       OutputSegment<E> &seg = *subsec->isec.osec.seg;
       i64 base = subsec->get_addr(ctx) - seg.cmd.vmaddr;
 
-      for (i64 j = 0; j < rels.size(); j++)
-        if (needs_rebasing(rels, j))
-          vec[i].emplace_back(seg.seg_idx, base + rels[j].offset);
+      for (Relocation<E> &rel : rels)
+        if (needs_rebasing(rel))
+          vec[i].emplace_back(seg.seg_idx, base + rel.offset);
     }
   });
 
@@ -733,7 +764,7 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
   for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms)
     if (!sym->has_got())
       rebases.emplace_back(ctx.data_seg->seg_idx,
-                           ctx.lazy_symbol_ptr.hdr.addr + i++ * word_size -
+                           ctx.lazy_symbol_ptr->hdr.addr + i++ * word_size -
                            ctx.data_seg->cmd.vmaddr);
 
   for (Symbol<E> *sym : ctx.got.syms)
@@ -901,7 +932,7 @@ void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym, i64 idx) {
   i64 seg_idx = ctx.data_seg->seg_idx;
   emit(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | seg_idx);
 
-  i64 offset = ctx.lazy_symbol_ptr.hdr.addr + idx * word_size -
+  i64 offset = ctx.lazy_symbol_ptr->hdr.addr + idx * word_size -
                ctx.data_seg->cmd.vmaddr;
   encode_uleb(contents, offset);
 
@@ -1221,10 +1252,12 @@ void IndirectSymtabSection<E>::compute_size(Context<E> &ctx) {
     if (!sym->has_got())
       n++;
 
-  ctx.lazy_symbol_ptr.hdr.reserved1 = n;
-  for (Symbol<E> *sym : ctx.stubs.syms)
-    if (!sym->has_got())
-      n++;
+  if (ctx.lazy_symbol_ptr) {
+    ctx.lazy_symbol_ptr->hdr.reserved1 = n;
+    for (Symbol<E> *sym : ctx.stubs.syms)
+      if (!sym->has_got())
+        n++;
+  }
 
   this->hdr.size = n * ENTRY_SIZE;
 }
@@ -1454,6 +1487,321 @@ void DataInCodeSection<E>::copy_buf(Context<E> &ctx) {
   write_vector(ctx.buf + this->hdr.offset, contents);
 }
 
+// Collect all locations that needs fixing on page-in
+template <typename E>
+std::vector<Fixup<E>> get_fixups(Context<E> &ctx) {
+  std::vector<std::vector<Fixup<E>>> vec(ctx.objs.size());
+
+  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
+    for (Subsection<E> *subsec : ctx.objs[i]->subsections) {
+      if (!subsec->is_alive)
+        continue;
+
+      for (Relocation<E> &r : subsec->get_rels()) {
+        if (r.type == E::abs_rel && r.sym && r.sym->is_imported)
+          vec[i].push_back({subsec->get_addr(ctx) + r.offset, r.sym, (u64)r.addend});
+        else if (needs_rebasing(r))
+          vec[i].push_back({subsec->get_addr(ctx) + r.offset});
+      }
+    }
+  });
+
+  std::vector<Fixup<E>> fixups = flatten(vec);
+
+  for (Symbol<E> *sym : ctx.got.syms)
+    fixups.push_back({sym->get_got_addr(ctx), sym->is_imported ? sym : nullptr});
+
+  for (Symbol<E> *sym : ctx.thread_ptrs.syms)
+    fixups.push_back({sym->get_tlv_addr(ctx), sym->is_imported ? sym : nullptr});
+
+  tbb::parallel_sort(fixups, [](const Fixup<E> &a, const Fixup<E> &b) {
+    return a.addr < b.addr;
+  });
+  return fixups;
+}
+
+// Returns fixups for a given segment
+template <typename E>
+static std::span<Fixup<E>>
+get_segment_fixups(std::vector<Fixup<E>> &fixups, OutputSegment<E> &seg) {
+  auto begin = std::partition_point(fixups.begin(), fixups.end(),
+                                    [&](const Fixup<E> &x) {
+    return x.addr < seg.cmd.vmaddr;
+  });
+
+  if (begin == fixups.end())
+    return {};
+
+  auto end = std::partition_point(begin, fixups.end(), [&](const Fixup<E> &x) {
+    return x.addr < seg.cmd.vmaddr + seg.cmd.vmsize;
+  });
+
+  return {&*begin, (size_t)(end - begin)};
+}
+
+template <typename E>
+bool operator<(const SymbolAddend<E> &a, const SymbolAddend<E> &b) {
+  if (a.sym != b.sym)
+    return *a.sym < *b.sym;
+  return a.addend < b.addend;
+}
+
+template <typename E>
+static std::tuple<std::vector<SymbolAddend<E>>, u32>
+get_dynsyms(std::vector<Fixup<E>> &fixups) {
+  // Collect all dynamic relocations and sort them by addend
+  std::vector<SymbolAddend<E>> syms;
+  for (Fixup<E> &x : fixups)
+    if (x.sym)
+      syms.push_back({x.sym, x.addend < 256 ? 0 : x.addend});
+
+  sort(syms);
+  remove_duplicates(syms);
+
+  // Set symbol ordinal
+  for (i64 i = 0; i < syms.size(); i++)
+    if (i == 0 || syms[i - 1].sym != syms[i].sym)
+      syms[i].sym->fixup_ordinal = i;
+
+  // Dynamic relocations can have an arbitrary large addend. For example,
+  // if you initialize a global variable pointer as `int *p = foo + (1<<31)`
+  // and `foo` is an imported symbol, it generates a dynamic relocation with
+  // an addend of 1<<31. Such large addend don't fit in a 64-bit in-place
+  // chained relocation, as its `addend` bitfield is only 8 bit wide.
+  //
+  // A dynamic relocation with large addend is represented as a pair of
+  // symbol name and an addend in the import table. We use an import table
+  // structure with an addend field only if it's necessary.
+  u64 max = 0;
+  for (SymbolAddend<E> &x : syms)
+    max = std::max(max, x.addend);
+
+  u32 import_format;
+  if (max == 0)
+    import_format = DYLD_CHAINED_IMPORT;
+  else if ((u32)max == max)
+    import_format = DYLD_CHAINED_IMPORT_ADDEND;
+  else
+    import_format = DYLD_CHAINED_IMPORT_ADDEND64;
+
+  return {std::move(syms), import_format};
+}
+
+template <typename E>
+u8 *ChainedFixupsSection<E>::allocate(i64 size) {
+  i64 off = contents.size();
+  contents.resize(contents.size() + size);
+  return contents.data() + off;
+}
+
+// macOS 13 or later supports a new mechanism to apply dynamic relocations.
+// In this comment, I'll explain what it is and how it works.
+//
+// In the traditional dynamic linking mechanism, data relocations are
+// applied eagerly on process startup; only function symbols are resolved
+// lazily through PLT/stubs. The new mechanism called the "page-in linking"
+// changes that; with the page-in linking, the kernel now applies data
+// relocations as it loads a new page from disk to memory. The page-in
+// linking has the following benefits compared to the ttraditional model:
+//
+//  1. Data relocations are no longer applied eagerly on startup, shotening
+//     the process startup time.
+//
+//  2. It reduces the number of dirty pages because until a process actually
+//     access a data page, no page is loaded to memory. Moreover, the kernel
+//     can now discard (instead of page out) an read-only page with
+//     relocations under memory pressure because it knows how to reconstruct
+//     the same page by applying the same dynamic relocations.
+//
+// `__chainfixups` section contains data needed for the page-in linking.
+// The section contains the first-level page table. Specifically, we have
+// one DyldChainedStartsInSegment data structure for each segment, and the
+// data structure contains a u16 array of the same length as the number of
+// pages in the segment. Each u16 value represents an in-page offset within
+// the corresponding page of the first location that needs fixing. With that
+// information, the kernel is able to know the first dynamically-linked
+// location in a page when it pages in a new page from disk.
+//
+// Unlike the traiditional dynamic linking model, there's no separate
+// relocation table. Relocation record is represented in a compact 64-bit
+// encoding and directly embedded to the place where the relocation is
+// applied to. In addition to that, each in-place relocation record contains
+// an offset to the next location in the same page that needs fixing. With
+// that, the kernel is able to follow that chain to apply all relocations
+// for a given page.
+//
+// This mechanism is so-called the "chained fixups", as the in-place
+// relocations form a linked list.
+template <typename E>
+void ChainedFixupsSection<E>::compute_size(Context<E> &ctx) {
+  fixups = get_fixups(ctx);
+  if (fixups.empty())
+    return;
+
+  // Section header
+  i64 hdr_size = align_to(sizeof(DyldChainedFixupsHeader), 8);
+  auto *h = (DyldChainedFixupsHeader *)allocate(hdr_size);
+  h->fixups_version = 0;
+  h->starts_offset = contents.size();
+
+  // Segment header
+  i64 starts_offset = contents.size();
+  i64 starts_size = align_to(sizeof(DyldChainedStartsInImage) +
+                             ctx.segments.size() * 4, 8);
+  auto *starts = (DyldChainedStartsInImage *)allocate(starts_size);
+  starts->seg_count = ctx.segments.size();
+
+  // Write the first-level page table for each segment
+  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments) {
+    std::span<Fixup<E>> fx = get_segment_fixups(fixups, *seg);
+    if (fx.empty())
+      continue;
+
+    starts = (DyldChainedStartsInImage *)(contents.data() + starts_offset);
+    starts->seg_info_offset[seg->seg_idx] = contents.size() - starts_offset;
+
+    i64 npages = align_to(seg->cmd.vmsize, E::page_size) / E::page_size;
+    i64 size = align_to(sizeof(DyldChainedStartsInSegment) + npages * 2, 8);
+
+    auto *rec = (DyldChainedStartsInSegment *)allocate(size);
+    rec->size = size;
+    rec->page_size = E::page_size;
+    rec->pointer_format = DYLD_CHAINED_PTR_64_OFFSET;
+    rec->segment_offset = seg->cmd.vmaddr - ctx.arg.pagezero_size;
+    rec->max_valid_pointer = 0;
+    rec->page_count = npages;
+
+    for (i64 i = 0, j = 0; i < npages; i++) {
+      u64 addr = seg->cmd.vmaddr + i * E::page_size;
+      while (j < fixups.size() && fixups[j].addr < addr)
+        j++;
+
+      if (j < fixups.size() && fixups[j].addr < addr + E::page_size)
+        rec->page_start[i] = fixups[j].addr & (E::page_size - 1);
+      else
+        rec->page_start[i] = DYLD_CHAINED_PTR_START_NONE;
+    }
+  }
+
+  // Write symbol import table
+  u32 import_format;
+  std::tie(dynsyms, import_format) = get_dynsyms(fixups);
+
+  h = (DyldChainedFixupsHeader *)contents.data();
+  h->imports_count = dynsyms.size();
+  h->imports_format = import_format;
+  h->imports_offset = contents.size();
+
+  if (import_format == DYLD_CHAINED_IMPORT)
+    write_imports<DyldChainedImport>(ctx);
+  else if (import_format == DYLD_CHAINED_IMPORT_ADDEND)
+    write_imports<DyldChainedImportAddend>(ctx);
+  else
+    write_imports<DyldChainedImportAddend64>(ctx);
+
+  // Write symbol names
+  h = (DyldChainedFixupsHeader *)contents.data();
+  h->symbols_offset = contents.size();
+  h->symbols_format = 0;
+
+  for (i64 i = 0; i < dynsyms.size(); i++)
+    if (Symbol<E> *sym = dynsyms[i].sym;
+        i == 0 || dynsyms[i - 1].sym != sym)
+      write_string(allocate(sym->name.size() + 1), sym->name);
+
+  contents.resize(align_to(contents.size(), 8));
+  this->hdr.size = contents.size();
+}
+
+// This function is a part of ChainedFixupsSection<E>::compute_size(),
+// but it's factored out as a separate function so that it can take
+// a type parameter.
+template <typename E>
+template <typename T>
+void ChainedFixupsSection<E>::write_imports(Context<E> &ctx) {
+  T *imports = (T *)allocate(sizeof(T) * dynsyms.size());
+  i64 nameoff = 0;
+
+  for (i64 i = 0; i < dynsyms.size(); i++) {
+    Symbol<E> &sym = *dynsyms[i].sym;
+
+    if (sym.file->is_dylib)
+      imports[i].lib_ordinal = ((DylibFile<E> *)sym.file)->dylib_idx;
+    else
+      imports[i].lib_ordinal = BIND_SPECIAL_DYLIB_WEAK_LOOKUP;
+
+    imports[i].weak_import = sym.is_weak;
+    imports[i].name_offset = nameoff;
+
+    if constexpr (requires (T x) { x.addend; })
+      imports[i].addend = dynsyms[i].addend;
+
+    if (i + 1 == dynsyms.size() || dynsyms[i + 1].sym != &sym)
+      nameoff += sym.name.size() + 1;
+  }
+}
+
+template <typename E>
+void ChainedFixupsSection<E>::copy_buf(Context<E> &ctx) {
+  memcpy(ctx.buf + this->hdr.offset, contents.data(), contents.size());
+}
+
+// This function is called after copy_sections_to_output_file().
+template <typename E>
+void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
+  Timer t(ctx, "write_fixup_chains");
+
+  auto page = [](u64 addr) { return addr & ~(u64)(E::page_size - 1); };
+
+  auto get_ordinal = [&](i64 i, u64 addend) {
+    for (; i < dynsyms.size(); i++)
+      if (dynsyms[i].addend == addend)
+        return i;
+    unreachable();
+  };
+
+  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments) {
+    std::span<Fixup<E>> fx = get_segment_fixups(fixups, *seg);
+
+    for (i64 i = 0; i < fx.size(); i++) {
+      constexpr u32 stride = 4;
+      u32 next = 0;
+      if (i + 1 < fx.size() && page(fx[i + 1].addr) == page(fx[i].addr))
+        next = (fx[i + 1].addr - fx[i].addr) / stride;
+
+      u8 *loc = ctx.buf + seg->cmd.fileoff + (fx[i].addr - seg->cmd.vmaddr);
+
+      if (Symbol<E> *sym = fx[i].sym) {
+        DyldChainedPtr64Bind *rec = (DyldChainedPtr64Bind *)loc;
+
+        if (fx[i].addend < 255) {
+          rec->ordinal = sym->fixup_ordinal;
+          rec->addend = fx[i].addend;
+        } else {
+          rec->ordinal = get_ordinal(sym->fixup_ordinal, fx[i].addend);
+          rec->addend = 0;
+        }
+
+        rec->reserved = 0;
+        rec->next = next;
+        rec->bind = 1;
+      } else {
+        u64 val = *(ul64 *)loc - ctx.arg.pagezero_size;
+        if ((val & 0xff00'000f'ffff'ffff) != val)
+          Error(ctx) << seg->cmd.get_segname()
+                     << ": rebase addend too large; re-link with -no_fixup_chains";
+
+        DyldChainedPtr64Rebase *rec = (DyldChainedPtr64Rebase *)loc;
+        rec->target = val;
+        rec->high8 = val >> 56;
+        rec->reserved = 0;
+        rec->next = next;
+        rec->bind = 0;
+      }
+    }
+  }
+}
+
 template <typename E>
 void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
   assert(sym->stub_idx == -1);
@@ -1463,11 +1811,11 @@ void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
   this->hdr.size = syms.size() * E::stub_size;
 
   if (!sym->has_got()) {
-    if (ctx.stub_helper.hdr.size == 0)
-      ctx.stub_helper.hdr.size = E::stub_helper_hdr_size;
+    if (ctx.stub_helper->hdr.size == 0)
+      ctx.stub_helper->hdr.size = E::stub_helper_hdr_size;
 
-    ctx.stub_helper.hdr.size += E::stub_helper_size;
-    ctx.lazy_symbol_ptr.hdr.size += word_size;
+    ctx.stub_helper->hdr.size += E::stub_helper_size;
+    ctx.lazy_symbol_ptr->hdr.size += word_size;
   }
 }
 
@@ -1669,7 +2017,7 @@ void LazySymbolPtrSection<E>::copy_buf(Context<E> &ctx) {
 
   for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms)
     if (!sym->has_got())
-      *buf++ = ctx.stub_helper.hdr.addr + E::stub_helper_hdr_size +
+      *buf++ = ctx.stub_helper->hdr.addr + E::stub_helper_hdr_size +
                i++ * E::stub_helper_size;
 }
 
@@ -1722,6 +2070,7 @@ template class ObjcStubsSection<E>;
 template class CodeSignatureSection<E>;
 template class ObjcImageInfoSection<E>;
 template class DataInCodeSection<E>;
+template class ChainedFixupsSection<E>;
 template class StubsSection<E>;
 template class StubHelperSection<E>;
 template class UnwindInfoSection<E>;

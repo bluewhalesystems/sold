@@ -324,7 +324,12 @@ inline void append(std::vector<T> &vec1, std::vector<U> vec2) {
 
 template <typename T>
 inline std::vector<T> flatten(std::vector<std::vector<T>> &vec) {
+  i64 size = 0;
+  for (std::vector<T> &v : vec)
+    size += v.size();
+
   std::vector<T> ret;
+  ret.reserve(size);
   for (std::vector<T> &v : vec)
     append(ret, v);
   return ret;

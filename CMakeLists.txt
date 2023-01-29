@@ -66,6 +66,7 @@ if(NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
     -fno-asynchronous-unwind-tables
     -Wno-sign-compare
     -Wno-unused-function
+    -Wno-bitfield-constant-conversion
     -ggnu-pubnames)
 endif()
 
