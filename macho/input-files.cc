@@ -234,40 +234,38 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
   std::erase(subsections, nullptr);
 }
 
-// Split __cstring section. The section contains string literals
-// (i.e. quoted strings in source files.) Such strings are merged by the
-// linker as a space optimization.
-//
-// Apple's ld and LLVM lld seem to have a logic to allow wide strings such
-// as UTF-16 or UTF-32 in __cstring. However, in practice, compilers
-// always put such strings into __const instead, so the contents of
-// __cstring is always ASCII or UTF-8. So we don't bother to handle wide
-// string contents.
+// Split __cstring section.
 template <typename E>
 void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
   for (std::unique_ptr<InputSection<E>> &isec : sections) {
-    if (!isec || isec->hdr.type != S_CSTRING_LITERALS)
-      continue;
+    if (isec && isec->hdr.type == S_CSTRING_LITERALS) {
+      std::string_view str = isec->contents;
+      size_t pos = 0;
 
-    std::string_view str = isec->contents;
-    i64 pos = 0;
+      while (pos < str.size()) {
+        size_t end = str.find('\0', pos);
+        if (end == str.npos)
+          Fatal(ctx) << *this << " corruupted cstring section: " << *isec;
 
-    while (pos < str.size()) {
-      i64 end = str.find('\0', pos);
-      if (end == str.npos)
-        Fatal(ctx) << *this << ": unterminated cstring section: " << *isec;
+        end = str.find_first_not_of('\0', end);
+        if (end == str.npos)
+          end = str.size();
 
-      Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
-        .input_offset = (u32)pos,
-        .input_size = (u32)(end - pos + 1),
-        .input_addr = (u32)(isec->hdr.addr + pos),
-        .is_alive = !ctx.arg.dead_strip,
-      };
+        // A constant string in __cstring has no alignment info, so we
+        // need to infer it.
+        Subsection<E> *subsec = new Subsection<E>{
+          .isec = *isec,
+          .input_offset = (u32)pos,
+          .input_size = (u32)(end - pos),
+          .input_addr = (u32)(isec->hdr.addr + pos),
+          .p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos)),
+          .is_alive = !ctx.arg.dead_strip,
+        };
 
-      subsec_pool.emplace_back(subsec);
-      subsections.push_back(subsec);
-      pos = end + 1;
+        subsec_pool.emplace_back(subsec);
+        subsections.push_back(subsec);
+        pos = end;
+      }
     }
   }
 }
