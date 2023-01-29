@@ -33,6 +33,7 @@ Options:
   -application_extension      Verify that all dylibs are extension-safe
     -no_application_extension
   -arch <ARCH_NAME>           Specify target architecture
+  -bind_at_load               Resolve all dynamic symbols on process startup
   -bundle                     Produce a mach-o bundle
   -bundle_loader <EXECUTABLE> Resolve undefined symbols using the given executable
   -compatibility_version <VERSION>
@@ -332,6 +333,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
         ctx.arg.arch = CPU_TYPE_ARM64;
       else
         Fatal(ctx) << "unknown -arch: " << arg;
+    } else if (read_flag("-bind_at_load")) {
+      ctx.arg.bind_at_load = true;
     } else if (read_flag("-bundle")) {
       ctx.output_type = MH_BUNDLE;
     } else if (read_arg("-bundle_loader")) {

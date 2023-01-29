@@ -1643,7 +1643,9 @@ void UnwindInfoSection<E>::copy_buf(Context<E> &ctx) {
 
 template <typename E>
 void GotSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
-  assert(sym->got_idx == -1);
+  if (sym->got_idx != -1)
+    return;
+
   sym->got_idx = syms.size();
   syms.push_back(sym);
   this->hdr.size = (syms.size() + subsections.size()) * word_size;

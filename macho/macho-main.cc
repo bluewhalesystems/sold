@@ -616,8 +616,13 @@ static void export_symbols(Context<E> &ctx) {
     for (Symbol<E> *sym : syms) {
       if (sym->flags & NEEDS_GOT)
         ctx.got.add(ctx, sym);
-      if (sym->flags & NEEDS_STUB)
+
+      if (sym->flags & NEEDS_STUB) {
+        if (ctx.arg.bind_at_load)
+          ctx.got.add(ctx, sym);
         ctx.stubs.add(ctx, sym);
+      }
+
       if (sym->flags & NEEDS_THREAD_PTR)
         ctx.thread_ptrs.add(ctx, sym);
       sym->flags = 0;
