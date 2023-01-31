@@ -1226,33 +1226,14 @@ void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
 template <typename E>
 std::unique_ptr<ObjcImageInfoSection<E>>
 ObjcImageInfoSection<E>::create(Context<E> &ctx) {
-  ObjcImageInfo *first = nullptr;
-
-  for (ObjectFile<E> *file : ctx.objs) {
-    if (file->objc_image_info) {
-      first = file->objc_image_info;
-      break;
-    }
-  }
-
-  if (!first)
-    return nullptr;
-
-  ObjcImageInfo info;
-  info.flags = (first->flags & OBJC_IMAGE_HAS_CATEGORY_CLASS_PROPERTIES);
+  ObjcImageInfo info = {};
 
   for (ObjectFile<E> *file : ctx.objs) {
     if (!file->objc_image_info)
       continue;
 
-    ObjcImageInfo &info2 = *file->objc_image_info;
-
-    // Make sure that all object files have the same flag.
-    if ((info.flags & OBJC_IMAGE_HAS_CATEGORY_CLASS_PROPERTIES) !=
-        (info2.flags & OBJC_IMAGE_HAS_CATEGORY_CLASS_PROPERTIES))
-      Error(ctx) << *file << ": incompatible __objc_imageinfo flag";
-
     // Make sure that all object files have the same Swift version.
+    ObjcImageInfo &info2 = *file->objc_image_info;
     if (info.swift_version == 0)
       info.swift_version = info2.swift_version;
 
@@ -1264,6 +1245,16 @@ ObjcImageInfoSection<E>::create(Context<E> &ctx) {
     info.swift_lang_version =
       std::max<u32>(info.swift_lang_version, info2.swift_lang_version);
   }
+
+  // This property is on if it is on in all input object files
+  auto has_category_class = [](ObjectFile<E> *file) -> bool {
+    if (ObjcImageInfo *info = file->objc_image_info)
+      return info->flags & OBJC_IMAGE_HAS_CATEGORY_CLASS_PROPERTIES;
+    return false;
+  };
+
+  if (std::all_of(ctx.objs.begin(), ctx.objs.end(), has_category_class))
+    info.flags |= OBJC_IMAGE_HAS_CATEGORY_CLASS_PROPERTIES;
 
   return std::make_unique<ObjcImageInfoSection<E>>(ctx, info);
 }

@@ -11,4 +11,4 @@ int main() {}
 EOF
 
 $CC --ld-path=./ld64 -o $t/exe $t/a.o $t/b.o
-objdump -h $t/exe | grep -q ' __literal8      00000008 '
+objdump -h $t/exe | grep -Eq ' __literal8\s+00000008\s'
