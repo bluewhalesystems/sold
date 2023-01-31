@@ -525,12 +525,29 @@ void OutputSegment<E>::set_offset_regular(Context<E> &ctx, i64 fileoff,
     return x.hdr.type == S_ZEROFILL || x.hdr.type == S_THREAD_LOCAL_ZEROFILL;
   };
 
-  auto get_alignment = [](Chunk<E> &chunk) {
+  auto get_tls_alignment = [&] {
+    i64 val = 1;
+    for (Chunk<E> *chunk : chunks)
+      if (chunk->hdr.type == S_THREAD_LOCAL_REGULAR ||
+          chunk->hdr.type == S_THREAD_LOCAL_ZEROFILL)
+        val = std::max<i64>(val, 1 << chunk->hdr.p2align);
+    return val;
+  };
+
+  auto get_alignment = [&](Chunk<E> &chunk) -> u32 {
     switch (chunk.hdr.type) {
     case S_THREAD_LOCAL_REGULAR:
     case S_THREAD_LOCAL_ZEROFILL:
+      // A TLS initialization image is copied as a contiguous block, so
+      // the alignment of it is the largest of __thread_data and
+      // __thread_bss.  This function returns an alignment value of a TLS
+      // initialization image.
+      return get_tls_alignment();
     case S_THREAD_LOCAL_VARIABLES:
-      return 16;
+      // __thread_vars needs to be aligned to word size because it
+      // contains pointers. For some reason, Apple's clang creates it with
+      // an alignment of 1. So we need to override.
+      return word_size;
     default:
       return 1 << chunk.hdr.p2align;
     }

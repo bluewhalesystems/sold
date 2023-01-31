@@ -100,7 +100,13 @@ TLVs are always referenced indirectly via `__thread_ptrs`. If a TLV is
 defined locally or resolved to the same Mach-O file, its `__thread_ptrs`
 entry refers to its `__thread_vars` entry in the same file. Otherwise,
 the `__thread_ptr` entry refers to a `__thread_vars` entry in other Mach-O
-file image.
+file image. In other words, `__thread_ptrs` is a GOT-like section for TLVs.
+
+A TLS template image consits of `__thread_data` and `__thread_bss` sections.
+`__thread_data` contains initial values for TLVs. `__thread_bss` specifies
+only its size. These sections must be consecutive in the output file;
+otherwise each per-thread block contains unrelated piece of data, resulting
+in waste of memory.
 
 ## Endianness and bitwidth
 
