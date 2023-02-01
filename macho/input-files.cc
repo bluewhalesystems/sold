@@ -582,6 +582,17 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
   }
 }
 
+// __mod_init_func section contains pointers to glolbal initializers, e.g.
+// functions that have to run before main().
+//
+// We can just copy input __mod_init_func sections into an output
+// __mod_init_func. In this case, the output consists of absolute
+// addresses of functions, which needs base relocation for PIE.
+//
+// If -init_offset is given, we translate __mod_init_func to __init_offset,
+// which contains 32-bit offsets from the image base to initializer functions.
+// __init_offset and __mod_init_func are functionally the same, but the
+// former doesn't need to be base-relocated and thus a bit more efficient.
 template <typename E>
 void ObjectFile<E>::parse_mod_init_func(Context<E> &ctx) {
   MachSection &hdr = *mod_init_func;
