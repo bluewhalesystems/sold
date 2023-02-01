@@ -964,13 +964,16 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
 
 template <typename E>
 void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
-  auto get_fullpath = [&]() -> std::string {
+  auto get_oso_name = [&]() -> std::string {
     if (!this->mf)
       return "<internal>";
 
     std::string name = path_clean(this->mf->name);
-    if (!this->mf->parent)
-      return name;
+    if (!this->mf->parent) {
+      if (name.starts_with('/'))
+        return name;
+      return ctx.cwd + "/" + name;
+    }
 
     std::string parent = path_clean(this->mf->parent->name);
     if (parent.starts_with('/'))
@@ -985,7 +988,10 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
   // and read debug info from object files.
   //
   // Debug symbols are called "stab" symbols.
-  this->oso_name = get_fullpath();
+  this->oso_name = get_oso_name();
+  if (!ctx.arg.oso_prefix.empty() && this->oso_name.starts_with(ctx.arg.oso_prefix))
+    this->oso_name = this->oso_name.substr(ctx.arg.oso_prefix.size());
+
   this->strtab_size += this->oso_name.size() + 1;
   this->num_stabs = 3;
 

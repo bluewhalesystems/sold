@@ -89,6 +89,7 @@ Options:
   -objc_abi_version <VERSION> Ignored
   -object_path_lto <FILE>     Write a LTO temporary file to a given path
   -order_file <FILE>          Layout functions and data according to specification in a given file
+  -oso_prefix <PREFIX>        Remove a given prefix from OSO symbols
   -pagezero_size <SIZE>       Specify the size of the __PAGEZERO segment
   -platform_version <PLATFORM> <MIN_VERSION> <SDK_VERSION>
                               Set platform, platform version and SDK version
@@ -462,6 +463,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.object_path_lto = arg;
     } else if (read_arg("-order_file")) {
       ctx.arg.order_file = read_lines(ctx, arg);
+    } else if (read_arg("-oso_prefix")) {
+      ctx.arg.oso_prefix = (arg == ".") ? ctx.cwd + "/" : arg;
     } else if (read_hex("-pagezero_size")) {
       pagezero_size = hex_arg;
     } else if (read_flag("-perf")) {
