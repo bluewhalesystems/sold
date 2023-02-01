@@ -129,13 +129,13 @@ static std::vector<u8> create_build_version_cmd(Context<E> &ctx) {
   cmd.cmd = LC_BUILD_VERSION;
   cmd.cmdsize = buf.size();
   cmd.platform = ctx.arg.platform;
-  cmd.minos = ctx.arg.platform_min_version;
-  cmd.sdk = ctx.arg.platform_sdk_version;
+  cmd.minos = ctx.arg.platform_min_version.encode();
+  cmd.sdk = ctx.arg.platform_sdk_version.encode();
   cmd.ntools = 1;
 
   BuildToolVersion &tool = *(BuildToolVersion *)(buf.data() + sizeof(cmd));
   tool.tool = TOOL_MOLD;
-  tool.version = parse_version(ctx, mold_version_string);
+  tool.version = parse_version(ctx, mold_version_string).encode();
   return buf;
 }
 
@@ -178,8 +178,8 @@ create_load_dylib_cmd(Context<E> &ctx, DylibFile<E> &dylib) {
   cmd.cmdsize = buf.size();
   cmd.nameoff = sizeof(cmd);
   cmd.timestamp = 2;
-  cmd.current_version = ctx.arg.current_version;
-  cmd.compatibility_version = ctx.arg.compatibility_version;
+  cmd.current_version = ctx.arg.current_version.encode();
+  cmd.compatibility_version = ctx.arg.compatibility_version.encode();
   write_string(buf.data() + sizeof(cmd), dylib.install_name);
   return buf;
 }

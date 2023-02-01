@@ -886,8 +886,19 @@ TextDylib parse_tbd(Context<E> &ctx, MappedFile<Context<E>> *mf);
 // cmdline.cc
 //
 
+struct VersionTriple {
+  VersionTriple &operator=(const VersionTriple &) = default;
+  auto operator<=>(const VersionTriple &) const = default;
+
+  i64 encode() const { return (major << 16) | (minor << 8) | patch; }
+
+  i64 major = 0;
+  i64 minor = 0;
+  i64 patch = 0;
+};
+
 template <typename E>
-i64 parse_version(Context<E> &ctx, std::string_view arg);
+VersionTriple parse_version(Context<E> &ctx, std::string_view arg);
 
 template <typename E>
 std::vector<std::string> parse_nonpositional_args(Context<E> &ctx);
@@ -978,6 +989,10 @@ struct Context {
     MultiGlob unexported_symbols_list;
     Symbol<E> *entry = nullptr;
     UuidKind uuid = UUID_HASH;
+    VersionTriple compatibility_version;
+    VersionTriple current_version;
+    VersionTriple platform_min_version;
+    VersionTriple platform_sdk_version;
     bool ObjC = false;
     bool adhoc_codesign = is_arm<E>;
     bool application_extension = false;
@@ -1001,14 +1016,10 @@ struct Context {
     bool stats = false;
     bool trace = false;
     i64 arch = CPU_TYPE_ARM64;
-    i64 compatibility_version = 0;
-    i64 current_version = 0;
     i64 filler = 0;
     i64 headerpad = 256;
     i64 pagezero_size = 0;
     i64 platform = PLATFORM_MACOS;
-    i64 platform_min_version = 0;
-    i64 platform_sdk_version = 0;
     i64 stack_size = 0;
     i64 thread_count = 0;
     std::string bundle_loader;

@@ -147,17 +147,19 @@ static i64 parse_platform(Context<E> &ctx, std::string_view arg) {
 }
 
 template <typename E>
-i64 parse_version(Context<E> &ctx, std::string_view arg) {
-  static std::regex re(R"((\d+)(?:\.(\d+))?(?:\.(\d+))?)",
-                       std::regex_constants::ECMAScript);
+VersionTriple parse_version(Context<E> &ctx, std::string_view arg) {
+  auto flags = std::regex_constants::ECMAScript | std::regex_constants::optimize;
+  static std::regex re(R"((\d+)(?:\.(\d+))?(?:\.(\d+))?)", flags);
+
   std::cmatch m;
   if (!std::regex_match(arg.data(), arg.data() + arg.size(), m, re))
     Fatal(ctx) << "malformed version number: " << arg;
 
-  i64 major = (m[1].length() == 0) ? 0 : stoi(m[1]);
-  i64 minor = (m[2].length() == 0) ? 0 : stoi(m[2]);
-  i64 patch = (m[3].length() == 0) ? 0 : stoi(m[3]);
-  return (major << 16) | (minor << 8) | patch;
+  VersionTriple v;
+  v.major = (m[1].length() == 0) ? 0 : stoi(m[1]);
+  v.minor = (m[2].length() == 0) ? 0 : stoi(m[2]);
+  v.patch = (m[3].length() == 0) ? 0 : stoi(m[3]);
+  return v;
 }
 
 template <typename E>
@@ -215,9 +217,9 @@ static bool should_enable_fixup_chains(Context<E> &ctx) {
   // We conservatively assume that it's supported since macOS 13 or iOS 16.
   switch (ctx.arg.platform) {
   case PLATFORM_MACOS:
-    return ctx.arg.platform_min_version >= (13 << 16);
+    return ctx.arg.platform_min_version >= VersionTriple{13, 0, 0};
   case PLATFORM_IOS:
-    return ctx.arg.platform_min_version >= (16 << 16);
+    return ctx.arg.platform_min_version >= VersionTriple{16, 0, 0};
   }
   return false;
 }
@@ -628,7 +630,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
 
 using E = MOLD_TARGET;
 
-template i64 parse_version(Context<E> &, std::string_view);
+template VersionTriple parse_version(Context<E> &, std::string_view);
 template std::vector<std::string> parse_nonpositional_args(Context<E> &);
 
 } // namespace mold::macho
