@@ -1576,15 +1576,15 @@ get_dynsyms(std::vector<Fixup<E>> &fixups) {
   for (SymbolAddend<E> &x : syms)
     max = std::max(max, x.addend);
 
-  u32 import_format;
+  u32 format;
   if (max == 0)
-    import_format = DYLD_CHAINED_IMPORT;
+    format = DYLD_CHAINED_IMPORT;
   else if ((u32)max == max)
-    import_format = DYLD_CHAINED_IMPORT_ADDEND;
+    format = DYLD_CHAINED_IMPORT_ADDEND;
   else
-    import_format = DYLD_CHAINED_IMPORT_ADDEND64;
+    format = DYLD_CHAINED_IMPORT_ADDEND64;
 
-  return {std::move(syms), import_format};
+  return {std::move(syms), format};
 }
 
 template <typename E>
@@ -1774,7 +1774,7 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
       if (Symbol<E> *sym = fx[i].sym) {
         DyldChainedPtr64Bind *rec = (DyldChainedPtr64Bind *)loc;
 
-        if (fx[i].addend < 255) {
+        if (fx[i].addend < 256) {
           rec->ordinal = sym->fixup_ordinal;
           rec->addend = fx[i].addend;
         } else {
