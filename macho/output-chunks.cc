@@ -156,7 +156,7 @@ static std::vector<u8> create_main_cmd(Context<E> &ctx) {
 
   cmd.cmd = LC_MAIN;
   cmd.cmdsize = buf.size();
-  cmd.entryoff = ctx.arg.entry->get_addr(ctx) - ctx.arg.pagezero_size;
+  cmd.entryoff = ctx.arg.entry->get_addr(ctx) - ctx.mach_hdr.hdr.addr;
   cmd.stacksize = ctx.arg.stack_size;
   return buf;
 }
@@ -1086,7 +1086,7 @@ void ExportSection<E>::compute_size(Context<E> &ctx) {
         enc.entries.push_back({
             sym->name,
             sym->is_weak ? EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION : 0,
-            sym->get_addr(ctx) - ctx.arg.pagezero_size});
+            sym->get_addr(ctx) - ctx.mach_hdr.hdr.addr});
 
   if (enc.entries.empty())
     return;
@@ -1125,7 +1125,7 @@ void FunctionStartsSection<E>::compute_size(Context<E> &ctx) {
   contents.resize(addrs.size() * 5);
 
   u8 *p = contents.data();
-  u64 last = ctx.arg.pagezero_size;
+  u64 last = ctx.mach_hdr.hdr.addr;
 
   for (u64 val : addrs) {
     p += write_uleb(p, val - last);
@@ -1667,7 +1667,7 @@ void ChainedFixupsSection<E>::compute_size(Context<E> &ctx) {
     rec->size = size;
     rec->page_size = E::page_size;
     rec->pointer_format = DYLD_CHAINED_PTR_64_OFFSET;
-    rec->segment_offset = seg->cmd.vmaddr - ctx.arg.pagezero_size;
+    rec->segment_offset = seg->cmd.vmaddr - ctx.mach_hdr.hdr.addr;
     rec->max_valid_pointer = 0;
     rec->page_count = npages;
 
@@ -1786,7 +1786,7 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
         rec->next = next;
         rec->bind = 1;
       } else {
-        u64 val = *(ul64 *)loc - ctx.arg.pagezero_size;
+        u64 val = *(ul64 *)loc - ctx.mach_hdr.hdr.addr;
         if ((val & 0xff00'000f'ffff'ffff) != val)
           Error(ctx) << seg->cmd.get_segname()
                      << ": rebase addend too large; re-link with -no_fixup_chains";
