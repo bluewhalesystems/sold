@@ -211,16 +211,7 @@ read_lines(Context<E> &ctx, std::string_view path) {
 
 template <typename E>
 static bool should_enable_fixup_chains(Context<E> &ctx) {
-  // We use DYLD_CHAINED_PTR_64_OFFSET as an in-place relocation format,
-  // and that relocation type doesn't seem to be supported from the begining.
-  // I don't know since which version macOS/iOS started supporting it.
-  // We conservatively assume that it's supported since macOS 13 or iOS 16.
-  switch (ctx.arg.platform) {
-  case PLATFORM_MACOS:
-    return ctx.arg.platform_min_version >= VersionTriple{13, 0, 0};
-  case PLATFORM_IOS:
-    return ctx.arg.platform_min_version >= VersionTriple{16, 0, 0};
-  }
+  // We want to enable it by default for newer OSes after more testing.
   return false;
 }
 
