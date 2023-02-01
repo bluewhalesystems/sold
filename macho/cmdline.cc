@@ -234,6 +234,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
   bool version_shown = false;
   std::optional<i64> pagezero_size;
   std::optional<bool> fixup_chains;
+  std::optional<bool> init_offsets;
 
   while (i < args.size()) {
     std::string_view arg;
@@ -431,9 +432,9 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_flag("-ignore_optimization_hints")) {
     } else if (read_flag("-enable_optimization_hints")) {
     } else if (read_flag("-init_offsets")) {
-      ctx.arg.init_offsets = true;
+      init_offsets = true;
     } else if (read_flag("-no_init_offsets")) {
-      ctx.arg.init_offsets = false;
+      init_offsets = false;
     } else if (read_arg("-install_name") || read_arg("-dylib_install_name")) {
       ctx.arg.install_name = arg;
     } else if (read_joined("-l")) {
@@ -598,6 +599,14 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     ctx.arg.fixup_chains = *fixup_chains;
   else
     ctx.arg.fixup_chains = should_enable_fixup_chains(ctx);
+
+  // -fixup_chain implies -init_offsets. They are not directly related,
+  // but all runtimes that support chained fixups also support __init_offsets,
+  // so we want to enable both if possible. This is what ld64 does too.
+  if (init_offsets.has_value())
+    ctx.arg.init_offsets = *init_offsets;
+  else
+    ctx.arg.init_offsets = ctx.arg.fixup_chains;
 
   if (ctx.arg.final_output.empty()) {
     if (!ctx.arg.install_name.empty())
