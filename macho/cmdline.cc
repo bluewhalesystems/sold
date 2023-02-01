@@ -58,6 +58,8 @@ Options:
   -exported_symbols_list <FILE>
                               Read a list of exported symbols from a given file
   -filelist <FILE>[,<DIR>]    Specify the list of input file names
+  -fixup_chains               Emit chained fixups for page-in linking
+    -no_fixup_chains
   -final_output <NAME>
   -force_load <FILE>          Include all objects from a given static archive
   -framework <NAME>,[,<SUFFIX>]
@@ -203,6 +205,21 @@ read_lines(Context<E> &ctx, std::string_view path) {
 }
 
 template <typename E>
+static bool should_enable_fixup_chains(Context<E> &ctx) {
+  // We use DYLD_CHAINED_PTR_64_OFFSET as an in-place relocation format,
+  // and that relocation type doesn't seem to be supported from the begining.
+  // I don't know since which version macOS/iOS started supporting it.
+  // We conservatively assume that it's supported since macOS 13 or iOS 16.
+  switch (ctx.arg.platform) {
+  case PLATFORM_MACOS:
+    return ctx.arg.platform_min_version >= (13 << 16);
+  case PLATFORM_IOS:
+    return ctx.arg.platform_min_version >= (16 << 16);
+  }
+  return false;
+}
+
+template <typename E>
 std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
   std::vector<std::string_view> &args = ctx.cmdline_args;
   std::vector<std::string> remaining;
@@ -213,6 +230,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
   bool nostdlib = false;
   bool version_shown = false;
   std::optional<i64> pagezero_size;
+  std::optional<bool> fixup_chains;
 
   while (i < args.size()) {
     std::string_view arg;
@@ -390,9 +408,9 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_arg("-final_output")) {
       ctx.arg.final_output = arg;
     } else if (read_flag("-fixup_chains")) {
-      ctx.arg.fixup_chains = true;
+      fixup_chains = true;
     } else if (read_flag("-no_fixup_chains")) {
-      ctx.arg.fixup_chains = false;
+      fixup_chains = false;
     } else if (read_arg("-force_load")) {
       remaining.push_back("-force_load");
       remaining.push_back(std::string(arg));
@@ -566,6 +584,11 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
   } else {
     ctx.arg.pagezero_size = (ctx.output_type == MH_EXECUTE) ? 0x100000000 : 0;
   }
+
+  if (fixup_chains.has_value())
+    ctx.arg.fixup_chains = *fixup_chains;
+  else
+    ctx.arg.fixup_chains = should_enable_fixup_chains(ctx);
 
   if (ctx.arg.final_output.empty()) {
     if (!ctx.arg.install_name.empty())
