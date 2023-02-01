@@ -456,6 +456,20 @@ ObjectFile<E>::find_subsection(Context<E> &ctx, u32 addr) {
   return *(it - 1);
 }
 
+// __compact_unwind consitss of fixed-sized records so-called compact
+// unwinding records. There is usually a compact unwinding record for each
+// function, and the record explains how to handle exceptions for that
+// function.
+//
+// Output file's __compact_unwind contains not only unwinding records but
+// also contains a two-level lookup table to quickly find out an unwinding
+// record for a given function address. When an exception is thrown at
+// runtime, the runtime looks up the table with the current program
+// counter as a key to find out an unwinding record to know how to handle
+// the exception.
+//
+// In order to construct the lookup table, we need to parse input files'
+// unwinding records. The following function does that.
 template <typename E>
 void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
   MachSection &hdr = *unwind_sec;
