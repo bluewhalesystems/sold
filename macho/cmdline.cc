@@ -71,6 +71,8 @@ Options:
   -hidden-l<LIB>
   -ignore_optimization_hints  Do not rewrite instructions as optimization (default)
     -enable_optimization_hints
+  -init_offsets               Convert initializer function list to PIE-friendly form
+    -no_init_offsets
   -install_name <NAME>
   -l<LIB>                     Search for a given library
   -lto_library <FILE>         Load a LTO linker plugin library
@@ -427,6 +429,10 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       remaining.push_back(std::string(arg));
     } else if (read_flag("-ignore_optimization_hints")) {
     } else if (read_flag("-enable_optimization_hints")) {
+    } else if (read_flag("-init_offsets")) {
+      ctx.arg.init_offsets = true;
+    } else if (read_flag("-no_init_offsets")) {
+      ctx.arg.init_offsets = false;
     } else if (read_arg("-install_name") || read_arg("-dylib_install_name")) {
       ctx.arg.install_name = arg;
     } else if (read_joined("-l")) {

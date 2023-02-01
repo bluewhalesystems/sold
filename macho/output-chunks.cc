@@ -1324,6 +1324,33 @@ void ObjcImageInfoSection<E>::copy_buf(Context<E> &ctx) {
   memcpy(ctx.buf + this->hdr.offset, &contents, sizeof(contents));
 }
 
+// Input __mod_init_func sections contain pointers to global initializer
+// functions. Since the addresses in the section are absolute, they need
+// base relocations, so the scheme is not efficient in PIC (position-
+// independent code).
+//
+// __init_offset is a new section to make it more efficient in PIC.
+// The section contains 32-bit offsets from the beginning of the image
+// to initializer functions. The section doesn't need base relocations.
+//
+// If `-init_offsets` is given, the linker converts input __mod_init_func
+// sections into an __init_offset section.
+template <typename E>
+void InitOffsetsSection<E>::compute_size(Context<E> &ctx) {
+  this->hdr.size = 0;
+  for (ObjectFile<E> *file : ctx.objs)
+    this->hdr.size += file->init_functions.size() * 4;
+}
+
+template <typename E>
+void InitOffsetsSection<E>::copy_buf(Context<E> &ctx) {
+  ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
+
+  for (ObjectFile<E> *file : ctx.objs)
+    for (Symbol<E> *sym : file->init_functions)
+      *buf++ = sym->get_addr(ctx) - ctx.mach_hdr.hdr.addr;
+}
+
 template <typename E>
 void CodeSignatureSection<E>::compute_size(Context<E> &ctx) {
   std::string filename = filepath(ctx.arg.final_output).filename().string();
@@ -2067,6 +2094,7 @@ template class SymtabSection<E>;
 template class StrtabSection<E>;
 template class IndirectSymtabSection<E>;
 template class ObjcStubsSection<E>;
+template class InitOffsetsSection<E>;
 template class CodeSignatureSection<E>;
 template class ObjcImageInfoSection<E>;
 template class DataInCodeSection<E>;

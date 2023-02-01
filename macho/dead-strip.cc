@@ -31,6 +31,9 @@ static void collect_root_set(Context<E> &ctx,
       if (sym->file == file && keep(sym))
         add(sym);
 
+    for (Symbol<E> *sym : file->init_functions)
+      add(sym);
+
     for (Subsection<E> *subsec : file->subsections)
       if (const MachSection &hdr = subsec->isec.hdr;
           (hdr.attr & S_ATTR_NO_DEAD_STRIP) ||

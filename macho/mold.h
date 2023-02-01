@@ -136,7 +136,8 @@ public:
   Subsection<E> *find_subsection(Context<E> &ctx, u32 addr);
   std::vector<std::string> get_linker_options(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
-  void parse_compact_unwind(Context<E> &ctx, MachSection &hdr);
+  void parse_compact_unwind(Context<E> &ctx);
+  void parse_mod_init_func(Context<E> &ctx);
   void resolve_symbols(Context<E> &ctx) override;
   void compute_symtab_size(Context<E> &ctx) override;
   void populate_symtab(Context<E> &ctx) override;
@@ -157,6 +158,10 @@ public:
   std::vector<UnwindRecord<E>> unwind_records;
   ObjcImageInfo *objc_image_info = nullptr;
   LTOModule *lto_module = nullptr;
+
+  // For __init_offsets
+  MachSection *mod_init_func = nullptr;
+  std::vector<Symbol<E> *> init_functions;
 
   // For the internal file and LTO object files
   std::vector<MachSym> mach_syms2;
@@ -665,6 +670,19 @@ public:
 };
 
 template <typename E>
+class InitOffsetsSection : public Chunk<E> {
+public:
+  InitOffsetsSection(Context<E> &ctx)
+    : Chunk<E>(ctx, "__TEXT", "__init_offsets") {
+    this->hdr.p2align = 2;
+    this->hdr.type = S_INIT_FUNC_OFFSETS;
+  }
+
+  void compute_size(Context<E> &ctx) override;
+  void copy_buf(Context<E> &ctx) override;
+};
+
+template <typename E>
 class CodeSignatureSection : public Chunk<E> {
 public:
   CodeSignatureSection(Context<E> &ctx)
@@ -974,6 +992,7 @@ struct Context {
     bool fatal_warnings = false;
     bool fixup_chains = false;
     bool function_starts = true;
+    bool init_offsets = false;
     bool mark_dead_strippable_dylib = false;
     bool noinhibit_exec = false;
     bool perf = false;
@@ -1084,6 +1103,7 @@ struct Context {
   std::unique_ptr<ObjcImageInfoSection<E>> image_info;
   std::unique_ptr<CodeSignatureSection<E>> code_sig;
   std::unique_ptr<ObjcStubsSection<E>> objc_stubs;
+  std::unique_ptr<InitOffsetsSection<E>> init_offsets;
 
   OutputSection<E> *text = nullptr;
   OutputSection<E> *data = nullptr;

@@ -394,6 +394,10 @@ static void create_synthetic_chunks(Context<E> &ctx) {
   if (ctx.arg.function_starts)
     ctx.function_starts.reset(new FunctionStartsSection(ctx));
 
+  // Create a __TEXT,__init_offsets section.
+  if (ctx.arg.init_offsets)
+    ctx.init_offsets.reset(new InitOffsetsSection(ctx));
+
   // Handle -sectcreate
   for (SectCreateOption arg : ctx.arg.sectcreate) {
     MappedFile<Context<E>> *mf =

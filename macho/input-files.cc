@@ -82,7 +82,10 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
       isec->parse_relocations(ctx);
 
   if (unwind_sec)
-    parse_compact_unwind(ctx, *unwind_sec);
+    parse_compact_unwind(ctx);
+
+  if (mod_init_func)
+    parse_mod_init_func(ctx);
 }
 
 template <typename E>
@@ -113,6 +116,11 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
       if (objc_image_info->version != 0)
         Fatal(ctx) << *this << ": __objc_imageinfo: unknown version: "
                    << (u32)objc_image_info->version;
+      continue;
+    }
+
+    if (ctx.arg.init_offsets && msec.type == S_MOD_INIT_FUNC_POINTERS) {
+      mod_init_func = &msec;
       continue;
     }
 
@@ -442,7 +450,9 @@ ObjectFile<E>::find_subsection(Context<E> &ctx, u32 addr) {
 }
 
 template <typename E>
-void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
+void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
+  MachSection &hdr = *unwind_sec;
+
   if (hdr.size % sizeof(CompactUnwindEntry))
     Fatal(ctx) << *this << ": invalid __compact_unwind section size";
 
@@ -548,6 +558,39 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx, MachSection &hdr) {
       j++;
     subsec.nunwind = j - i;
     i = j;
+  }
+}
+
+template <typename E>
+void ObjectFile<E>::parse_mod_init_func(Context<E> &ctx) {
+  MachSection &hdr = *mod_init_func;
+
+  if (hdr.size % word_size)
+    Fatal(ctx) << *this << ": __mod_init_func: unexpected section size";
+
+  MachRel *begin = (MachRel *)(this->mf->data + hdr.reloff);
+  std::vector<MachRel> rels(begin, begin + hdr.nreloc);
+
+  sort(rels, [](const MachRel &a, const MachRel &b) {
+    return a.offset < b.offset;
+  });
+
+  for (i64 i = 0; i < rels.size(); i++) {
+    MachRel r = rels[i];
+
+    if (r.type != E::abs_rel)
+      Fatal(ctx) << *this << ": __mod_init_func: unexpected relocation type";
+    if (r.offset != i * word_size)
+      Fatal(ctx) << *this << ": __mod_init_func: unexpected relocation offset";
+    if (!r.is_extern)
+      Fatal(ctx) << *this << ": __mod_init_func: unexpected is_extern value";
+
+    Symbol<E> *sym = this->syms[r.idx];
+
+    if (sym->scope != SCOPE_LOCAL)
+      Fatal(ctx) << *this << ": __mod_init_func: non-local initializer function";
+
+    init_functions.push_back(sym);
   }
 }
 
