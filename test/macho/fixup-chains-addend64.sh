@@ -15,9 +15,12 @@ extern int arr[5];
 int *p1 = arr + (1LL << 40);
 
 int main() {
-  printf("%d %d %d\n", arr[0], *(p1 - (1LL << 40)));
+  printf("%d %d\n", arr[0], *(p1 - (1LL << 40)));
 }
 EOF
 
-$CC --ld-path=./ld64 -o $t/exe $t/c.o $t/b.dylib -Wl,-fixup_chains
-$t/exe
+$CC --ld-path=./ld64 -o $t/exe1 $t/c.o $t/b.dylib -Wl,-fixup_chains
+$t/exe1 | grep -q '^1 1$'
+
+$CC --ld-path=./ld64 -o $t/exe2 $t/c.o $t/b.dylib -Wl,-no_fixup_chains
+$t/exe2 | grep -q '^1 1$'
