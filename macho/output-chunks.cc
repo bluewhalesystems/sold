@@ -1693,7 +1693,7 @@ void ChainedFixupsSection<E>::compute_size(Context<E> &ctx) {
     auto *rec = (DyldChainedStartsInSegment *)allocate(size);
     rec->size = size;
     rec->page_size = E::page_size;
-    rec->pointer_format = DYLD_CHAINED_PTR_64_OFFSET;
+    rec->pointer_format = DYLD_CHAINED_PTR_64;
     rec->segment_offset = seg->cmd.vmaddr - ctx.mach_hdr.hdr.addr;
     rec->max_valid_pointer = 0;
     rec->page_count = npages;
@@ -1813,7 +1813,7 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
         rec->next = next;
         rec->bind = 1;
       } else {
-        u64 val = *(ul64 *)loc - ctx.mach_hdr.hdr.addr;
+        u64 val = *(ul64 *)loc;
         if ((val & 0xff00'000f'ffff'ffff) != val)
           Error(ctx) << seg->cmd.get_segname()
                      << ": rebase addend too large; re-link with -no_fixup_chains";
