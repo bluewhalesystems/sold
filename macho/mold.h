@@ -208,15 +208,16 @@ public:
 
   std::vector<std::string_view> reexported_libs;
   std::vector<std::string> rpaths;
-  std::set<std::string_view> exports;
-  std::set<std::string_view> weak_exports;
 
 private:
   DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf);
 
   void parse_tapi(Context<E> &ctx);
   void parse_dylib(Context<E> &ctx);
+  void add_export(Context<E> &ctx, std::string_view name, u32 flags);
   void read_trie(Context<E> &ctx, u8 *start, i64 offset, const std::string &prefix);
+
+  std::map<std::string_view, u32> exports;
 };
 
 template <typename E>

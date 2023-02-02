@@ -1246,17 +1246,32 @@ void DylibFile<E>::parse(Context<E> &ctx) {
       Fatal(ctx) << install_name << ": cannot open reexported library " << path;
 
     DylibFile<E> *child = DylibFile<E>::create(ctx, mf);
-    exports.merge(child->exports);
-    weak_exports.merge(child->weak_exports);
+    for (auto [name, flags] : child->exports)
+      add_export(ctx, name, flags);
   }
 
-  // Initialize syms and is_weak_symbols vectors
-  for (std::string_view s : exports)
-    this->syms.push_back(get_symbol(ctx, s));
+  // Initialize syms
+  for (auto [name, flags] : exports)
+    this->syms.push_back(get_symbol(ctx, name));
+}
 
-  for (std::string_view s : weak_exports)
-    if (!exports.contains(s))
-      this->syms.push_back(get_symbol(ctx, s));
+template <typename E>
+void DylibFile<E>::add_export(Context<E> &ctx, std::string_view name, u32 flags) {
+  auto mask = EXPORT_SYMBOL_FLAGS_KIND_MASK;
+  auto tls = EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL;
+  auto weak = EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION;
+
+  u32 &existing = exports[name];
+  if (existing == 0) {
+    existing = flags;
+    return;
+  }
+
+  if (((existing & mask) == tls) != ((flags & mask) == tls))
+    Error(ctx) << *this << ": inconsistent TLS type: " << name;
+
+  if ((existing & weak) && !(flags & weak))
+    existing = flags;
 }
 
 template <typename E>
@@ -1284,11 +1299,7 @@ void DylibFile<E>::read_trie(Context<E> &ctx, u8 *start, i64 offset,
       read_uleb(buf); // addr
     }
 
-    if (flags & EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION)
-      weak_exports.insert(name);
-    else
-      exports.insert(name);
-
+    add_export(ctx, name, flags);
   } else {
     buf++;
   }
@@ -1310,8 +1321,12 @@ void DylibFile<E>::parse_tapi(Context<E> &ctx) {
 
   install_name = tbd.install_name;
   reexported_libs = std::move(tbd.reexported_libs);
-  exports = std::move(tbd.exports);
-  weak_exports = std::move(tbd.weak_exports);
+
+  for (std::string_view name : tbd.exports)
+    add_export(ctx, name, 0);
+
+  for (std::string_view name : tbd.weak_exports)
+    add_export(ctx, name, EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
 }
 
 template <typename E>
@@ -1364,21 +1379,28 @@ void DylibFile<E>::parse_dylib(Context<E> &ctx) {
 
 template <typename E>
 void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
+  auto it = exports.begin();
+
   for (i64 i = 0; i < this->syms.size(); i++) {
     Symbol<E> &sym = *this->syms[i];
+    u32 flags = it->second;
+    it++;
+
     std::scoped_lock lock(sym.mu);
 
     if (get_rank(this, false, false) < get_rank(sym)) {
       sym.file = this;
       sym.scope = SCOPE_LOCAL;
       sym.is_imported = true;
-      sym.is_weak = (this->is_weak || exports.size() <= i);
+      sym.is_weak = this->is_weak || (flags & EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
       sym.no_dead_strip = false;
       sym.subsec = nullptr;
       sym.value = 0;
       sym.is_common = false;
     }
   }
+
+  assert(it == exports.end());
 }
 
 template <typename E>
