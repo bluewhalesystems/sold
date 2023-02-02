@@ -211,7 +211,13 @@ read_lines(Context<E> &ctx, std::string_view path) {
 
 template <typename E>
 static bool should_enable_fixup_chains(Context<E> &ctx) {
-  // We want to enable it by default for newer OSes after more testing.
+  // Chained fixups are supported since macOS 11 or iOS 13.4.
+  switch (ctx.arg.platform) {
+  case PLATFORM_MACOS:
+    return ctx.arg.platform_min_version >= VersionTriple{11, 0, 0};
+  case PLATFORM_IOS:
+    return ctx.arg.platform_min_version >= VersionTriple{13, 4, 0};
+  }
   return false;
 }
 
