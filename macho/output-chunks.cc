@@ -1672,11 +1672,12 @@ void ChainedFixupsSection<E>::compute_size(Context<E> &ctx) {
   h->starts_offset = contents.size();
 
   // Segment header
+  i64 seg_count = ctx.segments.back()->seg_idx + 1;
   i64 starts_offset = contents.size();
   i64 starts_size = align_to(sizeof(DyldChainedStartsInImage) +
-                             ctx.segments.size() * 4, 8);
+                             seg_count * 4, 8);
   auto *starts = (DyldChainedStartsInImage *)allocate(starts_size);
-  starts->seg_count = ctx.segments.size();
+  starts->seg_count = seg_count;
 
   // Write the first-level page table for each segment
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments) {
