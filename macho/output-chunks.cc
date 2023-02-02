@@ -1687,7 +1687,8 @@ void ChainedFixupsSection<E>::compute_size(Context<E> &ctx) {
     starts = (DyldChainedStartsInImage *)(contents.data() + starts_offset);
     starts->seg_info_offset[seg->seg_idx] = contents.size() - starts_offset;
 
-    i64 npages = align_to(seg->cmd.vmsize, E::page_size) / E::page_size;
+    i64 npages =
+      align_to(fx.back().addr + 1 - seg->cmd.vmaddr, E::page_size) / E::page_size;
     i64 size = align_to(sizeof(DyldChainedStartsInSegment) + npages * 2, 8);
 
     auto *rec = (DyldChainedStartsInSegment *)allocate(size);
