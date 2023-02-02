@@ -1792,6 +1792,7 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
 
     for (i64 i = 0; i < fx.size(); i++) {
       constexpr u32 stride = 4;
+
       u32 next = 0;
       if (i + 1 < fx.size() && page(fx[i + 1].addr) == page(fx[i].addr))
         next = (fx[i + 1].addr - fx[i].addr) / stride;
@@ -1799,6 +1800,11 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
       u8 *loc = ctx.buf + seg->cmd.fileoff + (fx[i].addr - seg->cmd.vmaddr);
 
       if (Symbol<E> *sym = fx[i].sym) {
+        if (fx[i].addr % stride)
+          Error(ctx) << seg->cmd.get_segname()
+                     << ": unaligned relocation at 0x" << std::hex << fx[i].addr
+                     << " against `" << *sym << "; re-link with -no_fixup_chains";
+
         DyldChainedPtr64Bind *rec = (DyldChainedPtr64Bind *)loc;
 
         if (fx[i].addend < 256) {
@@ -1813,6 +1819,11 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
         rec->next = next;
         rec->bind = 1;
       } else {
+        if (fx[i].addr % stride)
+          Error(ctx) << seg->cmd.get_segname()
+                     << ": unaligned base relocation at 0x" << std::hex
+                     << fx[i].addr << "; re-link with -no_fixup_chains";
+
         u64 val = *(ul64 *)loc;
         if ((val & 0xff00'000f'ffff'ffff) != val)
           Error(ctx) << seg->cmd.get_segname()
