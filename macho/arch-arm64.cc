@@ -229,6 +229,10 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGE21:
     case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
+      if (!sym->is_tlv)
+        Error(ctx) << "illegal thread local variable reference to regular symbol `"
+                   << *sym << "`";
+
       sym->flags |= NEEDS_THREAD_PTR;
       break;
     }

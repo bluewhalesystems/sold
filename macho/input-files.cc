@@ -18,11 +18,12 @@ void InputFile<E>::clear_symbols() {
     if (__atomic_load_n(&sym->file, __ATOMIC_ACQUIRE) == this) {
       sym->scope = SCOPE_LOCAL;
       sym->is_imported = false;
+      sym->is_common = false;
       sym->is_weak = false;
+      sym->is_tlv = false;
       sym->no_dead_strip = false;
       sym->subsec = nullptr;
       sym->value = 0;
-      sym->is_common = false;
       __atomic_store_n(&sym->file, nullptr, __ATOMIC_RELEASE);
     }
   }
@@ -378,6 +379,7 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
     sym.scope = SCOPE_LOCAL;
     sym.is_common = false;
     sym.is_weak = false;
+    sym.is_tlv = false;
     sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
 
     if (msym.type == N_ABS) {
@@ -388,10 +390,12 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
         sym.subsec = find_subsection(ctx, msym.value);
 
       // Subsec is null if a symbol is in a __compact_unwind.
-      if (sym.subsec)
+      if (sym.subsec) {
         sym.value = msym.value - sym.subsec->input_addr;
-      else
+        sym.is_tlv = (sym.subsec->isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
+      } else {
         sym.value = msym.value;
+      }
     }
   }
 }
@@ -702,16 +706,19 @@ void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
         sym.subsec = nullptr;
         sym.value = msym.value;
         sym.is_common = true;
+        sym.is_tlv = false;
         break;
       case N_ABS:
         sym.subsec = nullptr;
         sym.value = msym.value;
         sym.is_common = false;
+        sym.is_tlv = false;
         break;
       case N_SECT:
         sym.subsec = sym_to_subsec[i];
         sym.value = msym.value - sym.subsec->input_addr;
         sym.is_common = false;
+        sym.is_tlv = (sym.subsec->isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
         break;
       default:
         Fatal(ctx) << sym << ": unknown symbol type: " << (u64)msym.type;
@@ -788,6 +795,7 @@ void ObjectFile<E>::convert_common_symbols(Context<E> &ctx) {
       sym.subsec = subsec;
       sym.value = 0;
       sym.is_common = false;
+      sym.is_tlv = false;
     }
   }
 }
@@ -1281,7 +1289,7 @@ void DylibFile<E>::read_trie(Context<E> &ctx, u8 *start, i64 offset,
 
   if (*buf) {
     read_uleb(buf); // size
-    i64 flags = read_uleb(buf) & ~EXPORT_SYMBOL_FLAGS_KIND_MASK;
+    u32 flags = read_uleb(buf);
     std::string_view name = save_string(ctx, prefix);
 
     if (flags & EXPORT_SYMBOL_FLAGS_REEXPORT) {
@@ -1383,8 +1391,8 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
 
   for (i64 i = 0; i < this->syms.size(); i++) {
     Symbol<E> &sym = *this->syms[i];
-    u32 flags = it->second;
-    it++;
+    u32 flags = (*it++).second;
+    u32 kind = (flags & EXPORT_SYMBOL_FLAGS_KIND_MASK);
 
     std::scoped_lock lock(sym.mu);
 
@@ -1397,6 +1405,7 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
       sym.subsec = nullptr;
       sym.value = 0;
       sym.is_common = false;
+      sym.is_tlv = (kind == EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL);
     }
   }
 

@@ -1080,13 +1080,20 @@ inline void ExportEncoder::write_trie(u8 *start, TrieNode &node) {
 
 template <typename E>
 void ExportSection<E>::compute_size(Context<E> &ctx) {
+  auto get_flags = [](Symbol<E> &sym) {
+    u32 flags = 0;
+    if (sym.is_weak)
+      flags |= EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION;
+    if (sym.is_tlv)
+      flags |= EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL;
+    return flags;
+  };
+
   for (ObjectFile<E> *file : ctx.objs)
     for (Symbol<E> *sym : file->syms)
       if (sym && sym->file == file && sym->scope == SCOPE_EXTERN)
-        enc.entries.push_back({
-            sym->name,
-            sym->is_weak ? EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION : 0,
-            sym->get_addr(ctx) - ctx.mach_hdr.hdr.addr});
+        enc.entries.push_back({sym->name, get_flags(*sym),
+                               sym->get_addr(ctx) - ctx.mach_hdr.hdr.addr});
 
   if (enc.entries.empty())
     return;

@@ -337,6 +337,7 @@ struct Symbol {
   bool is_imported : 1 = false;
   bool is_common : 1 = false;
   bool is_weak : 1 = false;
+  bool is_tlv : 1 = false;
   bool no_dead_strip : 1 = false;
   bool referenced_dynamically : 1 = false;
 
