@@ -1782,6 +1782,28 @@ void ChainedFixupsSection<E>::copy_buf(Context<E> &ctx) {
   memcpy(ctx.buf + this->hdr.offset, contents.data(), contents.size());
 }
 
+template <typename E>
+static InputSection<E> &
+find_input_section(Context<E> &ctx, OutputSegment<E> &seg, u64 addr) {
+  auto it = std::partition_point(seg.chunks.begin(), seg.chunks.end(),
+                                 [&](Chunk<E> *chunk) {
+    return chunk->hdr.addr < addr;
+  });
+
+  assert(it != seg.chunks.begin());
+
+  OutputSection<E> *osec = it[-1]->to_osec();
+  assert(osec);
+
+  auto it2 = std::partition_point(osec->members.begin(), osec->members.end(),
+                                  [&](Subsection<E> *subsec) {
+    return subsec->get_addr(ctx) < addr;
+  });
+
+  assert(it2 != osec->members.begin());
+  return it2[-1]->isec;
+}
+
 // This function is called after copy_sections_to_output_file().
 template <typename E>
 void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
@@ -1810,9 +1832,9 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
 
       if (Symbol<E> *sym = fx[i].sym) {
         if (fx[i].addr % stride)
-          Error(ctx) << seg->cmd.get_segname()
-                     << ": unaligned relocation at 0x" << std::hex << fx[i].addr
-                     << " against `" << *sym << "; re-link with -no_fixup_chains";
+          Error(ctx) << find_input_section(ctx, *seg, fx[i].addr)
+                     << ": unaligned relocation against `" << *sym
+                     << "; re-link with -no_fixup_chains";
 
         DyldChainedPtr64Bind *rec = (DyldChainedPtr64Bind *)loc;
 
@@ -1829,9 +1851,9 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
         rec->bind = 1;
       } else {
         if (fx[i].addr % stride)
-          Error(ctx) << seg->cmd.get_segname()
-                     << ": unaligned base relocation at 0x" << std::hex
-                     << fx[i].addr << "; re-link with -no_fixup_chains";
+          Error(ctx) << find_input_section(ctx, *seg, fx[i].addr)
+                     << ": unaligned base relocation; "
+                     << "re-link with -no_fixup_chains";
 
         u64 val = *(ul64 *)loc;
         if ((val & 0xff00'000f'ffff'ffff) != val)
