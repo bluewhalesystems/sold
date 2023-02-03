@@ -3,7 +3,7 @@
 Mach-O is an executable and linkable file format. It was originally
 created for the Mach kernel-based system. Since NeXTSTEP is based on the
 Mach kernel and the modern macOS/iOS is a direct descendent of it, Mach-O
-is now universally used as an object file on the Apple systems.
+is now universally used as an object file for the Apple systems.
 
 In this document, I'll explain Mach-O by comparing it with ELF.
 
@@ -57,8 +57,7 @@ resolution.
 There's no notion of "canonical PLT" in Mach-O because the compiler always
 emit code to load a function pointer value from GOT even for `-fno-PIC`.
 In other words, the compiler always assumes that the address of a function
-is not known at link-time. Therefore, we'll never see an object file which
-assumes that a function address is a link-time constant.
+is not known at link-time if the address is used as a value.
 
 ## Re-exported libraries
 
@@ -72,37 +71,35 @@ libraries while keeping the programming interface the same. For example,
 macOS's `libSystem.dylib` provides basic functionalities for macOS apps.
 Apple may want to move some features out of `libSystem.dylib` to a new
 dylib. They can safely do it by referring to the new dylib as a reexported
-library of `libSystem.dylib`. If there's no reexporting feature, they can't do
-this without asking other developers to add a new `-l` line to their build
-files.
+library of `libSystem.dylib`. If there's no reexporting feature, they can't
+do this without asking the library users to add a new `-l` line to their
+build files.
 
 ## Thread-local variables
 
 If a symbol is of thread-local variable (TLV), the symbol is defined in a
 `__thread_vars` section in an input file. A `__thread_vars` entry consists of
-a vector of the three word-size tuples of
+a vector of the three word-size tuples that contains
 
 1. a function pointer to `tlv_get_addr`,
 2. an indirect pointer to the TLS block of the Mach-O image, and
-3. the offset within the TLS block.
+3. the offset within the TLS block
 
-You can obtain the address of a TLV by calling the function pointer
-with the address of the tuple as an argument. `tlv_get_addr` then adds
-the TLS block address and the offset to compute the address of the TLV.
+at runtime. You can obtain the address of a TLV by calling the function
+pointer with the address of the tuple as an argument.
 
-TLVs are always referenced by `ARM64_RELOC_TLVP_LOAD_*` relocations (or
-`X86_64_RELOC_TLV` on x86-64). For each TLV referenced by these relocations,
-the linker creates an entry in the linker-synthesized `__thread_ptrs`
-section and let it refer to the address of its corresponding `__thread_vars`
-entry.
+TLVs are always referenced by `ARM64_RELOC_TLVP_LOAD_*` or `X86_64_RELOC_TLV`
+relocations. For each TLV referenced by these relocations, the linker
+creates an entry in the linker-synthesized `__thread_ptrs` section and let
+it refer to the address of its corresponding `__thread_vars` entry.
 
 TLVs are always referenced indirectly via `__thread_ptrs`. If a TLV is
-defined locally or resolved to the same Mach-O file, its `__thread_ptrs`
-entry refers to its `__thread_vars` entry in the same file. Otherwise,
-the `__thread_ptr` entry refers to a `__thread_vars` entry in other Mach-O
-file image. In other words, `__thread_ptrs` is a GOT-like section for TLVs.
+defined locally, its `__thread_ptrs` entry refers to a `__thread_vars`
+entry in the same file. Otherwise, the `__thread_ptr` entry refers to a
+`__thread_vars` entry in other Mach-O file image. In other words,
+`__thread_ptrs` is a GOT-like section for TLVs.
 
-A TLS template image consits of `__thread_data` and `__thread_bss` sections.
+A TLS template image consists of `__thread_data` and `__thread_bss` sections.
 `__thread_data` contains initial values for TLVs. `__thread_bss` specifies
 only its size. These sections must be consecutive in the output file;
 otherwise each per-thread block contains unrelated piece of data, resulting
@@ -112,7 +109,7 @@ in waste of memory.
 
 Since Mach-O is effectively used only by Apple, and all Apple systems are
 little-endian nowadays, Mach-O is effectively little-endian only.
-Likewise, it is 64-bit only since Apple has deprecated 32-bit apps.
+Likewise, it is 64-bit only since Apple has terminated 32-bit app support.
 
 Apple Watch seems to be using an ILP32 ABI on ARM64, but I don't know the
 details about it.
