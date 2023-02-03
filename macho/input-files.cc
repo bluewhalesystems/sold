@@ -1160,13 +1160,12 @@ DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
   this->is_alive = (ctx.needed_l || !ctx.arg.dead_strip_dylibs);
   this->is_weak = ctx.weak_l;
   this->is_reexported = ctx.reexport_l;
-  ctx.dylib_pool.emplace_back(this);
 }
 
 template <typename E>
 DylibFile<E> *DylibFile<E>::create(Context<E> &ctx, MappedFile<Context<E>> *mf) {
   DylibFile<E> *file = new DylibFile<E>(ctx, mf);
-  file->parse(ctx);
+  ctx.dylib_pool.emplace_back(file);
   return file;
 }
 
@@ -1248,6 +1247,7 @@ void DylibFile<E>::parse(Context<E> &ctx) {
       Fatal(ctx) << install_name << ": cannot open reexported library " << path;
 
     DylibFile<E> *child = DylibFile<E>::create(ctx, mf);
+    child->parse(ctx);
     for (auto [name, flags] : child->exports)
       add_export(ctx, name, flags);
   }

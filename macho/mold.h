@@ -13,6 +13,7 @@
 #include <tbb/concurrent_hash_map.h>
 #include <tbb/spin_mutex.h>
 #include <tbb/task_group.h>
+#include <tbb/task_group.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
@@ -1062,6 +1063,7 @@ struct Context {
   } arg;
 
   std::vector<std::string_view> cmdline_args;
+  tbb::task_group tg;
   u32 output_type = MH_EXECUTE;
   i64 file_priority = 10000;
   bool all_load = false;

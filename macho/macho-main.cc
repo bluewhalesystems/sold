@@ -824,17 +824,27 @@ static void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
   switch (get_file_type(ctx, mf)) {
   case FileType::TAPI:
   case FileType::MACH_DYLIB:
-  case FileType::MACH_EXE:
-    ctx.dylibs.push_back(DylibFile<E>::create(ctx, mf));
-    break;
+  case FileType::MACH_EXE: {
+    DylibFile<E> *file = DylibFile<E>::create(ctx, mf);
+    ctx.tg.run([file, &ctx] { file->parse(ctx); });
+    ctx.dylibs.push_back(file);
+ break;
+  }
   case FileType::MACH_OBJ:
-  case FileType::LLVM_BITCODE:
-    ctx.objs.push_back(ObjectFile<E>::create(ctx, mf, ""));
+  case FileType::LLVM_BITCODE: {
+    ObjectFile<E> *file = ObjectFile<E>::create(ctx, mf, "");
+    ctx.tg.run([file, &ctx] { file->parse(ctx); });
+    ctx.objs.push_back(file);
     break;
+  }
   case FileType::AR:
-    for (MappedFile<Context<E>> *child : read_archive_members(ctx, mf))
-      if (get_file_type(ctx, child) == FileType::MACH_OBJ)
-        ctx.objs.push_back(ObjectFile<E>::create(ctx, child, mf->name));
+    for (MappedFile<Context<E>> *child : read_archive_members(ctx, mf)) {
+      if (get_file_type(ctx, child) == FileType::MACH_OBJ) {
+        ObjectFile<E> *file = ObjectFile<E>::create(ctx, child, mf->name);
+        ctx.tg.run([file, &ctx] { file->parse(ctx); });
+        ctx.objs.push_back(file);
+      }
+    }
     break;
   default:
     Fatal(ctx) << mf->name << ": unknown file type";
@@ -1033,6 +1043,8 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
   // An object file can contain linker directives to load other object
   // files or libraries, so process them if any.
   for (i64 i = 0; i < ctx.objs.size(); i++) {
+    ctx.tg.wait();
+
     ObjectFile<E> *file = ctx.objs[i];
     std::vector<std::string> opts = file->get_linker_options(ctx);
 
@@ -1065,15 +1077,8 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
   for (i64 i = 1; DylibFile<E> *file : ctx.dylibs)
     if (file->dylib_idx != BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE)
       file->dylib_idx = i++;
-}
 
-template <typename E>
-static void parse_object_files(Context<E> &ctx) {
-  Timer t(ctx, "parse_object_files");
-
-  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    file->parse(ctx);
-  });
+  ctx.tg.wait();
 }
 
 template <typename E>
@@ -1152,7 +1157,6 @@ int macho_main(int argc, char **argv) {
     ctx.code_sig.reset(new CodeSignatureSection<E>(ctx));
 
   read_input_files(ctx, file_args);
-  parse_object_files(ctx);
 
   // `-ObjC` is an option to load all members of static archive
   // libraries that implement an Objective-C class or category.
