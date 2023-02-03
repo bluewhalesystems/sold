@@ -171,8 +171,8 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
     auto add_subsec = [&](u32 addr) {
       Subsection<E> *subsec = new Subsection<E>{
         .isec = isec,
-        .input_size = (u32)(isec->hdr.addr + isec->hdr.size - addr),
         .input_addr = addr,
+        .input_size = (u32)(isec->hdr.addr + isec->hdr.size - addr),
         .p2align = (u8)isec->hdr.p2align,
         .is_alive = !ctx.arg.dead_strip,
       };
@@ -224,8 +224,8 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
 
     Subsection<E> *subsec = new Subsection<E>{
       .isec = isec,
-      .input_size = (u32)isec->hdr.size,
       .input_addr = (u32)isec->hdr.addr,
+      .input_size = (u32)isec->hdr.size,
       .p2align = (u8)isec->hdr.p2align,
       .is_alive = !ctx.arg.dead_strip,
     };
@@ -267,8 +267,8 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
       // need to infer it.
       Subsection<E> *subsec = new Subsection<E>{
         .isec = &*isec,
-        .input_size = (u32)(end - pos),
         .input_addr = (u32)(isec->hdr.addr + pos),
+        .input_size = (u32)(end - pos),
         .p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos)),
         .is_alive = !ctx.arg.dead_strip,
       };
@@ -290,8 +290,8 @@ void ObjectFile<E>::split_fixed_size_literals(Context<E> &ctx) {
     for (i64 pos = 0; pos < isec.contents.size(); pos += size) {
       Subsection<E> *subsec = new Subsection<E>{
         .isec = &isec,
-        .input_size = size,
         .input_addr = (u32)(isec.hdr.addr + pos),
+        .input_size = size,
         .p2align = (u8)std::countr_zero(size),
         .is_alive = !ctx.arg.dead_strip,
       };
@@ -332,8 +332,8 @@ void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
     for (i64 pos = 0; pos < str.size(); pos += word_size) {
       Subsection<E> *subsec = new Subsection<E>{
         .isec = &*isec,
-        .input_size = word_size,
         .input_addr = (u32)(isec->hdr.addr + pos),
+        .input_size = word_size,
         .p2align = (u8)std::countr_zero(word_size),
         .is_alive = !ctx.arg.dead_strip,
       };
@@ -938,8 +938,8 @@ ObjectFile<E>::add_methname_string(Context<E> &ctx, std::string_view contents) {
 
   Subsection<E> *subsec = new Subsection<E>{
     .isec = isec,
-    .input_size = (u32)contents.size() + 1,
     .input_addr = (u32)addr,
+    .input_size = (u32)contents.size() + 1,
     .p2align = 0,
     .is_alive = !ctx.arg.dead_strip,
   };
@@ -983,8 +983,8 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
   // Create a dummy subsection
   Subsection<E> *subsec = new Subsection<E>{
     .isec = isec,
-    .input_size = word_size,
     .input_addr = (u32)msec->addr,
+    .input_size = word_size,
     .rel_offset = 0,
     .nrels = 1,
     .p2align = (u8)std::countr_zero(word_size),
