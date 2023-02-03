@@ -116,17 +116,17 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
 
       for (i64 i = 0; i < rels.size(); i++) {
         Relocation<E> &r = rels[i];
-        if (!r.sym->file || r.type != ARM64_RELOC_BRANCH26)
+        if (!r.sym()->file || r.type != ARM64_RELOC_BRANCH26)
           continue;
 
         // Skip if the destination is within reach.
-        if (is_reachable(ctx, *r.sym, *subsec, r))
+        if (is_reachable(ctx, *r.sym(), *subsec, r))
           continue;
 
         // If the symbol is already in another thunk, reuse it.
-        if (r.sym->thunk_idx != -1) {
-          r.thunk_idx = r.sym->thunk_idx;
-          r.thunk_sym_idx = r.sym->thunk_sym_idx;
+        if (r.sym()->thunk_idx != -1) {
+          r.thunk_idx = r.sym()->thunk_idx;
+          r.thunk_sym_idx = r.sym()->thunk_sym_idx;
           continue;
         }
 
@@ -134,10 +134,10 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
         r.thunk_idx = thunk->thunk_idx;
         r.thunk_sym_idx = -1;
 
-        if (!(r.sym->flags.fetch_or(NEEDS_RANGE_EXTN_THUNK) &
+        if (!(r.sym()->flags.fetch_or(NEEDS_RANGE_EXTN_THUNK) &
               NEEDS_RANGE_EXTN_THUNK)) {
           std::scoped_lock lock(thunk->mu);
-          thunk->symbols.push_back(r.sym);
+          thunk->symbols.push_back(r.sym());
         }
       }
     });
@@ -163,7 +163,7 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
                            [&](Subsection<E> *subsec) {
       for (Relocation<E> &r : subsec->get_rels())
         if (r.thunk_idx == thunk->thunk_idx)
-          r.thunk_sym_idx = r.sym->thunk_sym_idx;
+          r.thunk_sym_idx = r.sym()->thunk_sym_idx;
     });
 
     // Move B forward to point to the begining of the next group.

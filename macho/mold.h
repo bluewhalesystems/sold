@@ -36,24 +36,33 @@ template <typename E> struct Symbol;
 template <typename E>
 struct Relocation {
   u64 get_addr(Context<E> &ctx) const {
-    return sym ? sym->get_addr(ctx) : subsec->get_addr(ctx);
+    return sym() ? sym()->get_addr(ctx) : subsec()->get_addr(ctx);
+  }
+
+  // A relocation refers to either a symbol or a subsection
+  Symbol<E> *sym() const {
+    return is_sym ? (Symbol<E> *)target : nullptr;
+  }
+
+  Subsection<E> *subsec() const {
+    return is_sym ? nullptr : (Subsection<E> *)target;
   }
 
   bool refers_to_tls() const {
-    if (sym && sym->subsec) {
-      u32 type = sym->subsec->isec.hdr.type;
+    if (sym() && sym()->subsec) {
+      u32 type = sym()->subsec->isec.hdr.type;
       return type == S_THREAD_LOCAL_REGULAR || type == S_THREAD_LOCAL_ZEROFILL;
     }
     return false;
   }
 
+  void *target = nullptr;
+  i64 addend = 0;
   u32 offset = 0;
   u8 type = -1;
   u8 size = 0;
+  bool is_sym : 1 = false;
   bool is_subtracted : 1 = false;
-  i64 addend = 0;
-  Symbol<E> *sym = nullptr;
-  Subsection<E> *subsec = nullptr;
 
   // For range extension thunks
   i16 thunk_idx = -1;

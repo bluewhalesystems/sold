@@ -982,7 +982,8 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
     .offset = 0,
     .type = E::abs_rel,
     .size = (u8)word_size,
-    .subsec = &methname,
+    .target = &methname,
+    .is_sym = false,
   });
 
   // Create a dummy subsection

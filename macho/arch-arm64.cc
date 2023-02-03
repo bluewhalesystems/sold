@@ -184,14 +184,20 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
     }
 
     MachRel &r = rels[i];
-    vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
+
+    vec.push_back(Relocation<E>{
+      .offset = r.offset,
+      .type = (u8)r.type,
+      .size = (u8)(1 << r.p2size),
+    });
 
     Relocation<E> &rel = vec.back();
     rel.is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR);
 
     // A relocation refers to either a symbol or a section
     if (r.is_extern) {
-      rel.sym = file.syms[r.idx];
+      rel.target = file.syms[r.idx];
+      rel.is_sym = true;
       rel.addend = addend;
     } else {
       u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend) : addend;
@@ -199,7 +205,8 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
       if (!target)
         Fatal(ctx) << file << ": bad relocation: " << r.offset;
 
-      rel.subsec = target;
+      rel.target = target;
+      rel.is_sym = false;
       rel.addend = addr - target->input_addr;
     }
   }
@@ -210,7 +217,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
 template <>
 void Subsection<E>::scan_relocations(Context<E> &ctx) {
   for (Relocation<E> &r : get_rels()) {
-    Symbol<E> *sym = r.sym;
+    Symbol<E> *sym = r.sym();
     if (!sym)
       continue;
 
@@ -246,8 +253,8 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
   for (i64 i = 0; i < rels.size(); i++) {
     Relocation<E> &r = rels[i];
 
-    if (r.sym && !r.sym->file) {
-      Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym;
+    if (r.sym() && !r.sym()->file) {
+      Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym();
       continue;
     }
 
@@ -255,7 +262,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
     u64 P = get_addr(ctx) + r.offset;
-    u64 G = r.sym ? r.sym->got_idx * word_size : 0;
+    u64 G = r.sym() ? r.sym()->got_idx * word_size : 0;
     u64 GOT = ctx.got.hdr.addr;
 
     switch (r.type) {
@@ -263,7 +270,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       ASSERT(r.size == 8);
 
       // Do not write a value if we have a dynamic relocation for this reloc.
-      if (r.sym && r.sym->is_imported)
+      if (r.sym() && r.sym()->is_imported)
         break;
 
       // __thread_vars contains TP-relative addresses to symbols in the
@@ -309,10 +316,10 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       *(ul32 *)loc = G + GOT + A - P;
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGE21:
-      *(ul32 *)loc |= page_offset(r.sym->get_tlv_addr(ctx) + A, P);
+      *(ul32 *)loc |= page_offset(r.sym()->get_tlv_addr(ctx) + A, P);
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
-      write_add_ldst(loc, r.sym->get_tlv_addr(ctx) + A);
+      write_add_ldst(loc, r.sym()->get_tlv_addr(ctx) + A);
       break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;

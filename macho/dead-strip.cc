@@ -58,11 +58,11 @@ static void visit(Context<E> &ctx, Subsection<E> &subsec) {
     return;
 
   for (Relocation<E> &rel : subsec.get_rels()) {
-    if (rel.sym) {
-      if (rel.sym->subsec)
-        visit(ctx, *rel.sym->subsec);
+    if (rel.sym()) {
+      if (rel.sym()->subsec)
+        visit(ctx, *rel.sym()->subsec);
     } else {
-      visit(ctx, *rel.subsec);
+      visit(ctx, *rel.subsec());
     }
   }
 
@@ -78,11 +78,11 @@ static void visit(Context<E> &ctx, Subsection<E> &subsec) {
 template <typename E>
 static bool refers_to_live_subsection(Subsection<E> &subsec) {
   for (Relocation<E> &rel : subsec.get_rels()) {
-    if (rel.sym) {
-      if (rel.sym->subsec && rel.sym->subsec->is_alive)
+    if (rel.sym()) {
+      if (rel.sym()->subsec && rel.sym()->subsec->is_alive)
         return true;
     } else {
-      if (rel.subsec->is_alive)
+      if (rel.subsec()->is_alive)
         return true;
     }
   }

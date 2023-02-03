@@ -729,7 +729,7 @@ static bool needs_rebasing(const Relocation<E> &r) {
     return false;
 
   // If we have a dynamic reloc, we don't need to rebase it.
-  if (r.sym && r.sym->is_imported)
+  if (r.sym() && r.sym()->is_imported)
     return false;
 
   // If it refers a TLS block, it's already relative to the thread
@@ -871,9 +871,9 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
     for (Subsection<E> *subsec : ctx.objs[i]->subsections) {
       if (subsec->is_alive) {
         for (Relocation<E> &r : subsec->get_rels()) {
-          if (r.type == E::abs_rel && r.sym && r.sym->is_imported) {
+          if (r.type == E::abs_rel && r.sym() && r.sym()->is_imported) {
             OutputSegment<E> &seg = *subsec->isec.osec.seg;
-            vec[i].emplace_back(r.sym, seg.seg_idx,
+            vec[i].emplace_back(r.sym(), seg.seg_idx,
                                 subsec->get_addr(ctx) + r.offset - seg.cmd.vmaddr,
                                 r.addend);
           }
@@ -1532,8 +1532,9 @@ std::vector<Fixup<E>> get_fixups(Context<E> &ctx) {
         continue;
 
       for (Relocation<E> &r : subsec->get_rels()) {
-        if (r.type == E::abs_rel && r.sym && r.sym->is_imported)
-          vec[i].push_back({subsec->get_addr(ctx) + r.offset, r.sym, (u64)r.addend});
+        if (r.type == E::abs_rel && r.sym() && r.sym()->is_imported)
+          vec[i].push_back({subsec->get_addr(ctx) + r.offset, r.sym(),
+                            (u64)r.addend});
         else if (needs_rebasing(r))
           vec[i].push_back({subsec->get_addr(ctx) + r.offset});
       }

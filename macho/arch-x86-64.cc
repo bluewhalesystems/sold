@@ -126,7 +126,12 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 
   for (i64 i = 0; i < hdr.nreloc; i++) {
     MachRel &r = rels[i];
-    vec.push_back({r.offset, (u8)r.type, (u8)(1 << r.p2size)});
+
+    vec.push_back(Relocation<E>{
+      .offset = r.offset,
+      .type = (u8)r.type,
+      .size = (u8)(1 << r.p2size),
+    });
 
     Relocation<E> &rel = vec.back();
     rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
@@ -135,7 +140,8 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
                  get_reloc_addend(r.type);
 
     if (r.is_extern) {
-      rel.sym = file.syms[r.idx];
+      rel.target = file.syms[r.idx];
+      rel.is_sym = true;
       rel.addend = addend;
     } else {
       u64 addr = r.is_pcrel ? (hdr.addr + r.offset + addend + 4) : addend;
@@ -143,7 +149,8 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
       if (!target)
         Fatal(ctx) << file << ": bad relocation: " << r.offset;
 
-      rel.subsec = target;
+      rel.target = target;
+      rel.is_sym = false;
       rel.addend = addr - target->input_addr;
     }
   }
@@ -154,7 +161,7 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 template <>
 void Subsection<E>::scan_relocations(Context<E> &ctx) {
   for (Relocation<E> &r : get_rels()) {
-    Symbol<E> *sym = r.sym;
+    Symbol<E> *sym = r.sym();
     if (!sym)
       continue;
 
@@ -188,8 +195,8 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
   for (i64 i = 0; i < rels.size(); i++) {
     Relocation<E> &r = rels[i];
 
-    if (r.sym && !r.sym->file) {
-      Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym;
+    if (r.sym() && !r.sym()->file) {
+      Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym();
       continue;
     }
 
@@ -197,14 +204,14 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
     u64 P = get_addr(ctx) + r.offset;
-    u64 G = r.sym ? r.sym->got_idx * word_size : 0;
+    u64 G = r.sym() ? r.sym()->got_idx * word_size : 0;
     u64 GOT = ctx.got.hdr.addr;
 
     switch (r.type) {
     case X86_64_RELOC_UNSIGNED:
       ASSERT(r.size == 8);
 
-      if (r.sym && r.sym->is_imported)
+      if (r.sym() && r.sym()->is_imported)
         break;
 
       if (r.refers_to_tls())
@@ -239,7 +246,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       break;
     case X86_64_RELOC_TLV:
       ASSERT(r.size == 4);
-      *(ul32 *)loc = r.sym->get_tlv_addr(ctx) + A - P - 4;
+      *(ul32 *)loc = r.sym()->get_tlv_addr(ctx) + A - P - 4;
       break;
     default:
       Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;

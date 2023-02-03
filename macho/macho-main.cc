@@ -522,7 +522,7 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
   Timer t(ctx, "uniquify_literal_pointers");
 
   auto get_target = [](Relocation<E> &r) -> Subsection<E> * {
-    Subsection<E> *subsec = r.sym ? r.sym->subsec : r.subsec;
+    Subsection<E> *subsec = r.sym() ? r.sym()->subsec : r.subsec();
     if (!subsec)
       return nullptr;
     return subsec->replacer ? subsec->replacer : subsec;
@@ -576,8 +576,8 @@ static void merge_mergeable_sections(Context<E> &ctx) {
     for (std::unique_ptr<InputSection<E>> &isec : file->sections)
       if (isec)
         for (Relocation<E> &r : isec->rels)
-          if (r.subsec && r.subsec->replacer)
-            r.subsec = r.subsec->replacer;
+          if (r.subsec() && r.subsec()->replacer)
+            r.target = r.subsec()->replacer;
   });
 
   std::vector<InputFile<E> *> files;
