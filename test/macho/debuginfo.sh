@@ -24,8 +24,8 @@ $CC --ld-path=./ld64 -o $t/exe $t/a.o $t/c.a -g
 
 $t/exe | grep -q 'Hello world'
 
-lldb --batch -o 'b main' -o run -o list $t/exe | \
+lldb -o 'b main' -o run -o list -o quit $t/exe | \
   grep -Eq '^-> 3\s+int main\(\) { hello\(\); }'
 
-lldb --batch -o 'b hello' -o run -o list $t/exe | \
+lldb -o 'b hello' -o run -o list -o quit $t/exe | \
   grep -Eq '^-> 3\s+void hello\(\) { printf\("Hello world\\n"\); }'
