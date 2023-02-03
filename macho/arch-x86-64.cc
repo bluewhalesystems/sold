@@ -207,7 +207,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       if (r.sym && r.sym->is_imported)
         break;
 
-      if (r.refers_tls())
+      if (r.refers_to_tls())
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else
         *(ul64 *)loc = S + A;

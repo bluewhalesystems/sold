@@ -268,7 +268,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
 
       // __thread_vars contains TP-relative addresses to symbols in the
       // TLS initialization image (i.e. __thread_data and __thread_bss).
-      if (r.refers_tls())
+      if (r.refers_to_tls())
         *(ul64 *)loc = S + A - ctx.tls_begin;
       else
         *(ul64 *)loc = S + A;

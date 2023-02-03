@@ -39,7 +39,7 @@ struct Relocation {
     return sym ? sym->get_addr(ctx) : subsec->get_addr(ctx);
   }
 
-  bool refers_tls() const {
+  bool refers_to_tls() const {
     if (sym && sym->subsec) {
       u32 type = sym->subsec->isec.hdr.type;
       return type == S_THREAD_LOCAL_REGULAR || type == S_THREAD_LOCAL_ZEROFILL;

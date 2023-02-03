@@ -734,7 +734,7 @@ static bool needs_rebasing(const Relocation<E> &r) {
 
   // If it refers a TLS block, it's already relative to the thread
   // pointer, so it doesn't have to be adjusted to the loaded address.
-  if (r.refers_tls())
+  if (r.refers_to_tls())
     return false;
 
   return true;

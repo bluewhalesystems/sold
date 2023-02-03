@@ -76,7 +76,7 @@ static void visit(Context<E> &ctx, Subsection<E> &subsec) {
 }
 
 template <typename E>
-static bool refers_live_subsection(Subsection<E> &subsec) {
+static bool refers_to_live_subsection(Subsection<E> &subsec) {
   for (Relocation<E> &rel : subsec.get_rels()) {
     if (rel.sym) {
       if (rel.sym->subsec && rel.sym->subsec->is_alive)
@@ -105,7 +105,7 @@ static void mark(Context<E> &ctx,
       for (Subsection<E> *subsec : file->subsections) {
         if ((subsec->isec.hdr.attr & S_ATTR_LIVE_SUPPORT) &&
             !subsec->is_alive &&
-            refers_live_subsection(*subsec)) {
+            refers_to_live_subsection(*subsec)) {
           visit(ctx, *subsec);
           repeat = true;
         }
