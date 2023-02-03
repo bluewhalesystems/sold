@@ -254,7 +254,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     Relocation<E> &r = rels[i];
 
     if (r.sym() && !r.sym()->file) {
-      Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym();
+      Error(ctx) << "undefined symbol: " << isec->file << ": " << *r.sym();
       continue;
     }
 
@@ -295,7 +295,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     case ARM64_RELOC_BRANCH26: {
       i64 val = S + A - P;
       if (val < -(1 << 27) || (1 << 27) <= val)
-        val = isec.osec.thunks[r.thunk_idx]->get_addr(r.thunk_sym_idx) - P;
+        val = isec->osec.thunks[r.thunk_idx]->get_addr(r.thunk_sym_idx) - P;
       *(ul32 *)loc |= bits(val, 27, 2);
       break;
     }
@@ -322,7 +322,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       write_add_ldst(loc, r.sym()->get_tlv_addr(ctx) + A);
       break;
     default:
-      Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
+      Fatal(ctx) << *isec << ": unknown reloc: " << (int)r.type;
     }
   }
 }

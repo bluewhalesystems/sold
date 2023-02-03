@@ -750,7 +750,7 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
         continue;
 
       std::span<Relocation<E>> rels = subsec->get_rels();
-      OutputSegment<E> &seg = *subsec->isec.osec.seg;
+      OutputSegment<E> &seg = *subsec->isec->osec.seg;
       i64 base = subsec->get_addr(ctx) - seg.cmd.vmaddr;
 
       for (Relocation<E> &rel : rels)
@@ -872,7 +872,7 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
       if (subsec->is_alive) {
         for (Relocation<E> &r : subsec->get_rels()) {
           if (r.type == E::abs_rel && r.sym() && r.sym()->is_imported) {
-            OutputSegment<E> &seg = *subsec->isec.osec.seg;
+            OutputSegment<E> &seg = *subsec->isec->osec.seg;
             vec[i].emplace_back(r.sym(), seg.seg_idx,
                                 subsec->get_addr(ctx) + r.offset - seg.cmd.vmaddr,
                                 r.addend);
@@ -1122,7 +1122,7 @@ void FunctionStartsSection<E>::compute_size(Context<E> &ctx) {
     ObjectFile<E> &file = *ctx.objs[i];
     for (Symbol<E> *sym : file.syms)
       if (sym && sym->file == &file && sym->subsec && sym->subsec->is_alive &&
-          &sym->subsec->isec.osec == ctx.text)
+          &sym->subsec->isec->osec == ctx.text)
         vec[i].push_back(sym->get_addr(ctx));
   });
 
@@ -1802,7 +1802,7 @@ find_input_section(Context<E> &ctx, OutputSegment<E> &seg, u64 addr) {
   });
 
   assert(it2 != osec->members.begin());
-  return it2[-1]->isec;
+  return *it2[-1]->isec;
 }
 
 // This function is called after copy_sections_to_output_file().

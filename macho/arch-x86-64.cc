@@ -196,7 +196,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     Relocation<E> &r = rels[i];
 
     if (r.sym() && !r.sym()->file) {
-      Error(ctx) << "undefined symbol: " << isec.file << ": " << *r.sym();
+      Error(ctx) << "undefined symbol: " << isec->file << ": " << *r.sym();
       continue;
     }
 
@@ -249,7 +249,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       *(ul32 *)loc = r.sym()->get_tlv_addr(ctx) + A - P - 4;
       break;
     default:
-      Fatal(ctx) << isec << ": unknown reloc: " << (int)r.type;
+      Fatal(ctx) << *isec<< ": unknown reloc: " << (int)r.type;
     }
   }
 }

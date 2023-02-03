@@ -50,7 +50,7 @@ struct Relocation {
 
   bool refers_to_tls() const {
     if (sym() && sym()->subsec) {
-      u32 type = sym()->subsec->isec.hdr.type;
+      u32 type = sym()->subsec->isec->hdr.type;
       return type == S_THREAD_LOCAL_REGULAR || type == S_THREAD_LOCAL_ZEROFILL;
     }
     return false;
@@ -264,30 +264,30 @@ template <typename E>
 class Subsection {
 public:
   u64 get_addr(Context<E> &ctx) const {
-    return isec.osec.hdr.addr + output_offset;
+    return isec->osec.hdr.addr + output_offset;
   }
 
   std::string_view get_contents() {
-    assert(isec.hdr.type != S_ZEROFILL);
-    return isec.contents.substr(input_addr - isec.hdr.addr, input_size);
+    assert(isec->hdr.type != S_ZEROFILL);
+    return isec->contents.substr(input_addr - isec->hdr.addr, input_size);
   }
 
   std::span<UnwindRecord<E>> get_unwind_records() {
-    return std::span<UnwindRecord<E>>(isec.file.unwind_records)
+    return std::span<UnwindRecord<E>>(isec->file.unwind_records)
       .subspan(unwind_offset, nunwind);
   }
 
   std::span<Relocation<E>> get_rels() const {
-    return std::span<Relocation<E>>(isec.rels).subspan(rel_offset, nrels);
+    return std::span<Relocation<E>>(isec->rels).subspan(rel_offset, nrels);
   }
 
   void scan_relocations(Context<E> &ctx);
   void apply_reloc(Context<E> &ctx, u8 *buf);
 
-  InputSection<E> &isec;
-
-  // Refers to another subsection If this subsection is merged with it
-  Subsection<E> *replacer = nullptr;
+  union {
+    InputSection<E> *isec = nullptr;
+    Subsection<E> *replacer; // used only if `is_replaced` is true
+  };
 
   u32 input_addr = 0;
   u32 input_size = 0;
@@ -300,6 +300,7 @@ public:
   Atomic<u8> p2align = 0;
   Atomic<bool> is_alive = true;
   bool added_to_osec : 1 = false;
+  bool is_replaced : 1 = false;
 };
 
 template <typename E>
@@ -487,8 +488,8 @@ public:
   void add_subsec(Subsection<E> *subsec) {
     members.push_back(subsec);
     this->hdr.p2align = std::max<u32>(this->hdr.p2align, subsec->p2align);
-    this->hdr.attr |= subsec->isec.hdr.attr;
-    this->hdr.type = subsec->isec.hdr.type;
+    this->hdr.attr |= subsec->isec->hdr.attr;
+    this->hdr.type = subsec->isec->hdr.type;
 
     assert(!subsec->added_to_osec);
     subsec->added_to_osec = true;

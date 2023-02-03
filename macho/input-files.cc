@@ -170,7 +170,7 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
     // We start with one big subsection and split it as we process symbols
     auto add_subsec = [&](u32 addr) {
       Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
+        .isec = isec,
         .input_size = (u32)(isec->hdr.addr + isec->hdr.size - addr),
         .input_addr = addr,
         .p2align = (u8)isec->hdr.p2align,
@@ -223,7 +223,7 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
       continue;
 
     Subsection<E> *subsec = new Subsection<E>{
-      .isec = *isec,
+      .isec = isec,
       .input_size = (u32)isec->hdr.size,
       .input_addr = (u32)isec->hdr.addr,
       .p2align = (u8)isec->hdr.p2align,
@@ -266,7 +266,7 @@ void ObjectFile<E>::split_cstring_literals(Context<E> &ctx) {
       // A constant string in __cstring has no alignment info, so we
       // need to infer it.
       Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
+        .isec = &*isec,
         .input_size = (u32)(end - pos),
         .input_addr = (u32)(isec->hdr.addr + pos),
         .p2align = std::min<u8>(isec->hdr.p2align, std::countr_zero(pos)),
@@ -289,7 +289,7 @@ void ObjectFile<E>::split_fixed_size_literals(Context<E> &ctx) {
 
     for (i64 pos = 0; pos < isec.contents.size(); pos += size) {
       Subsection<E> *subsec = new Subsection<E>{
-        .isec = isec,
+        .isec = &isec,
         .input_size = size,
         .input_addr = (u32)(isec.hdr.addr + pos),
         .p2align = (u8)std::countr_zero(size),
@@ -331,7 +331,7 @@ void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
 
     for (i64 pos = 0; pos < str.size(); pos += word_size) {
       Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
+        .isec = &*isec,
         .input_size = word_size,
         .input_addr = (u32)(isec->hdr.addr + pos),
         .p2align = (u8)std::countr_zero(word_size),
@@ -387,7 +387,7 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
       // Subsec is null if a symbol is in a __compact_unwind.
       if (sym.subsec) {
         sym.value = msym.value - sym.subsec->input_addr;
-        sym.is_tlv = (sym.subsec->isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
+        sym.is_tlv = (sym.subsec->isec->hdr.type == S_THREAD_LOCAL_VARIABLES);
       } else {
         sym.value = msym.value;
       }
@@ -713,7 +713,7 @@ void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
         sym.subsec = sym_to_subsec[i];
         sym.value = msym.value - sym.subsec->input_addr;
         sym.is_common = false;
-        sym.is_tlv = (sym.subsec->isec.hdr.type == S_THREAD_LOCAL_VARIABLES);
+        sym.is_tlv = (sym.subsec->isec->hdr.type == S_THREAD_LOCAL_VARIABLES);
         break;
       default:
         Fatal(ctx) << sym << ": unknown symbol type: " << (u64)msym.type;
@@ -776,7 +776,7 @@ void ObjectFile<E>::convert_common_symbols(Context<E> &ctx) {
     if (sym.file == this && sym.is_common) {
       InputSection<E> *isec = get_common_sec(ctx);
       Subsection<E> *subsec = new Subsection<E>{
-        .isec = *isec,
+        .isec = isec,
         .input_size = (u32)msym.value,
         .p2align = (u8)msym.common_p2align,
         .is_alive = !ctx.arg.dead_strip,
@@ -937,7 +937,7 @@ ObjectFile<E>::add_methname_string(Context<E> &ctx, std::string_view contents) {
   isec->contents = contents;
 
   Subsection<E> *subsec = new Subsection<E>{
-    .isec = *isec,
+    .isec = isec,
     .input_size = (u32)contents.size() + 1,
     .input_addr = (u32)addr,
     .p2align = 0,
@@ -982,7 +982,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
 
   // Create a dummy subsection
   Subsection<E> *subsec = new Subsection<E>{
-    .isec = *isec,
+    .isec = isec,
     .input_size = word_size,
     .input_addr = (u32)msec->addr,
     .rel_offset = 0,
@@ -1042,7 +1042,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
       this->num_locals++;
 
     if (sym->subsec)
-      this->num_stabs += sym->subsec->isec.hdr.is_text() ? 2 : 1;
+      this->num_stabs += sym->subsec->isec->hdr.is_text() ? 2 : 1;
 
     this->strtab_size += sym->name.size() + 1;
     sym->output_symtab_idx = -2;
@@ -1104,10 +1104,10 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
       continue;
 
     stab[stab_idx].stroff = pos[i];
-    stab[stab_idx].sect = sym->subsec->isec.osec.sect_idx;
+    stab[stab_idx].sect = sym->subsec->isec->osec.sect_idx;
     stab[stab_idx].value = sym->get_addr(ctx);
 
-    if (sym->subsec->isec.hdr.is_text()) {
+    if (sym->subsec->isec->hdr.is_text()) {
       stab[stab_idx].n_type = N_FUN;
       stab[stab_idx + 1].n_type = N_FUN;
       stab[stab_idx + 1].sect = sym->subsec->input_size;
@@ -1136,7 +1136,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
     if (sym->is_imported)
       msym.sect = N_UNDF;
     else if (sym->subsec)
-      msym.sect = sym->subsec->isec.osec.sect_idx;
+      msym.sect = sym->subsec->isec->osec.sect_idx;
     else if (sym == ctx.__mh_execute_header)
       msym.sect = ctx.text->sect_idx;
     else if (sym == ctx.__dyld_private || sym == ctx.__mh_dylib_header ||

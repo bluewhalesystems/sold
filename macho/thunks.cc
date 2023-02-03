@@ -24,7 +24,7 @@ static bool is_reachable(Context<E> &ctx, Symbol<E> &sym,
 
   // We create thunks with a pessimistic assumption that all
   // out-of-section relocations would be out-of-range.
-  if (!sym.subsec || &sym.subsec->isec.osec != &subsec.isec.osec)
+  if (!sym.subsec || &sym.subsec->isec->osec != &subsec.isec->osec)
     return false;
 
   if (sym.subsec->output_offset == -1)

@@ -410,13 +410,13 @@ static void create_synthetic_chunks(Context<E> &ctx) {
     if (Symbol<E> *sym = get_symbol(ctx, name); sym->file)
       if (Subsection<E> *subsec = sym->subsec)
         if (!subsec->added_to_osec)
-          subsec->isec.osec.add_subsec(subsec);
+          subsec->isec->osec.add_subsec(subsec);
 
   // Add remaining subsections to output sections.
   for (ObjectFile<E> *file : ctx.objs)
     for (Subsection<E> *subsec : file->subsections)
       if (!subsec->added_to_osec)
-        subsec->isec.osec.add_subsec(subsec);
+        subsec->isec->osec.add_subsec(subsec);
 
   // Add output sections to segments.
   for (Chunk<E> *chunk : ctx.chunks) {
@@ -492,7 +492,7 @@ static void uniquify_literals(Context<E> &ctx, OutputSection<E> &osec) {
     ref.ent = map.insert(key, ref.hash, {ref.subsec}).first;
 
     Subsection<E> *existing = ref.ent->owner;
-    while (existing->isec.file.priority < ref.subsec->isec.file.priority &&
+    while (existing->isec->file.priority < ref.subsec->isec->file.priority &&
            !ref.ent->owner.compare_exchange_weak(existing, ref.subsec,
                                                  std::memory_order_relaxed));
 
@@ -501,13 +501,15 @@ static void uniquify_literals(Context<E> &ctx, OutputSection<E> &osec) {
 
   // Decide who will become the owner for each subsection.
   tbb::parallel_for_each(vec, [&](SubsecRef &ref) {
-    if (ref.subsec && ref.subsec != ref.ent->owner)
+    if (ref.subsec && ref.subsec != ref.ent->owner) {
       ref.subsec->replacer = ref.ent->owner;
+      ref.subsec->is_replaced = true;
+    }
   });
 
   static Counter counter("num_merged_strings");
   counter += std::erase_if(osec.members, [](Subsection<E> *subsec) {
-    return subsec->replacer;
+    return subsec->is_replaced;
   });
 }
 
@@ -525,7 +527,7 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
     Subsection<E> *subsec = r.sym() ? r.sym()->subsec : r.subsec();
     if (!subsec)
       return nullptr;
-    return subsec->replacer ? subsec->replacer : subsec;
+    return subsec->is_replaced ? subsec->replacer : subsec;
   };
 
   std::unordered_map<Subsection<E> *, Subsection<E> *> map;
@@ -537,15 +539,17 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
     if (rels.size() == 1) {
       if (Subsection<E> *target = get_target(rels[0])) {
         auto [it, inserted] = map.insert({target, subsec});
-        if (!inserted)
+        if (!inserted) {
           subsec->replacer = it->second;
+          subsec->is_replaced = true;
+        }
       }
     }
   }
 
   static Counter counter("num_merged_literal_pointers");
   counter += std::erase_if(osec.members, [](Subsection<E> *subsec) {
-    return subsec->replacer;
+    return subsec->is_replaced;
   });
 }
 
@@ -576,7 +580,7 @@ static void merge_mergeable_sections(Context<E> &ctx) {
     for (std::unique_ptr<InputSection<E>> &isec : file->sections)
       if (isec)
         for (Relocation<E> &r : isec->rels)
-          if (r.subsec() && r.subsec()->replacer)
+          if (r.subsec() && r.subsec()->is_replaced)
             r.target = r.subsec()->replacer;
   });
 
@@ -586,14 +590,14 @@ static void merge_mergeable_sections(Context<E> &ctx) {
 
   tbb::parallel_for_each(files, [&](InputFile<E> *file) {
     for (Symbol<E> *sym : file->syms)
-      if (sym && sym->file == file && sym->subsec && sym->subsec->replacer)
+      if (sym && sym->file == file && sym->subsec && sym->subsec->is_replaced)
         sym->subsec = sym->subsec->replacer;
   });
 
   // Remove deduplicated subsections from each file's subsection vector.
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->subsections, [](Subsection<E> *subsec) {
-      return subsec->replacer;
+      return subsec->is_replaced;
     });
   });
 }

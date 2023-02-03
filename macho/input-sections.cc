@@ -58,7 +58,7 @@ void InputSection<E>::parse_relocations(Context<E> &ctx) {
     Subsection<E> &subsec = **it;
     subsec.rel_offset = i;
 
-    u32 input_offset = subsec.input_addr - subsec.isec.hdr.addr;
+    u32 input_offset = subsec.input_addr - subsec.isec->hdr.addr;
     while (i < rels.size() && rels[i].offset < input_offset + subsec.input_size) {
       rels[i].offset -= input_offset;
       i++;
