@@ -973,10 +973,10 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
 
   // Create a dummy relocation
   isec->rels.push_back(Relocation<E>{
+    .target = &methname,
     .offset = 0,
     .type = E::abs_rel,
     .size = (u8)word_size,
-    .target = &methname,
     .is_sym = false,
   });
 
