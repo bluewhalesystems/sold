@@ -269,7 +269,7 @@ public:
 
   std::string_view get_contents() {
     assert(isec.hdr.type != S_ZEROFILL);
-    return isec.contents.substr(input_offset, input_size);
+    return isec.contents.substr(input_addr - isec.hdr.addr, input_size);
   }
 
   std::span<UnwindRecord<E>> get_unwind_records() {
@@ -285,17 +285,17 @@ public:
   void apply_reloc(Context<E> &ctx, u8 *buf);
 
   InputSection<E> &isec;
-  u32 input_offset = 0;
-  u32 input_size = 0;
+
+  // Refers to another subsection If this subsection is merged with it
+  Subsection<E> *replacer = nullptr;
+
   u32 input_addr = 0;
+  u32 input_size = 0;
   u32 output_offset = (u32)-1;
   u32 rel_offset = 0;
   u32 nrels = 0;
   u32 unwind_offset = 0;
   u32 nunwind = 0;
-
-  // Refers another subsection If this subsection is merged with it
-  Subsection<E> *replacer = nullptr;
 
   Atomic<u8> p2align = 0;
   Atomic<bool> is_alive = true;
