@@ -224,6 +224,12 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
     if (sym->is_imported && sym->file->is_dylib)
       ((DylibFile<E> *)sym->file)->is_alive = true;
 
+    bool is_tlv_reloc = (r.type == ARM64_RELOC_TLVP_LOAD_PAGE21 ||
+                         r.type == ARM64_RELOC_TLVP_LOAD_PAGEOFF12);
+    if (is_tlv_reloc != sym->is_tlv)
+      Error(ctx) << "illegal thread local variable reference to regular symbol `"
+                 << *sym << "`";
+
     switch (r.type) {
     case ARM64_RELOC_BRANCH26:
       if (sym->is_imported)
@@ -236,10 +242,6 @@ void Subsection<E>::scan_relocations(Context<E> &ctx) {
       break;
     case ARM64_RELOC_TLVP_LOAD_PAGE21:
     case ARM64_RELOC_TLVP_LOAD_PAGEOFF12:
-      if (!sym->is_tlv)
-        Error(ctx) << "illegal thread local variable reference to regular symbol `"
-                   << *sym << "`";
-
       sym->flags |= NEEDS_THREAD_PTR;
       break;
     }
