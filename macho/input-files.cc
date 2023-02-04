@@ -1133,9 +1133,6 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
     if (!sym || sym->file != this || sym->output_symtab_idx == -1)
       continue;
 
-    if (sym->name.starts_with('l') || sym->name.starts_with('L'))
-      continue;
-
     MachSym &msym = buf[sym->output_symtab_idx];
     msym.stroff = pos[i];
     msym.is_extern = (sym->is_imported || sym->scope == SCOPE_EXTERN);
