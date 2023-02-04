@@ -1034,6 +1034,11 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
     if (!sym || sym->file != this || (sym->subsec && !sym->subsec->is_alive))
       continue;
 
+    // Symbols starting with l or L are compiler-generated private labels
+    // that should be stripped from the symbol table.
+    if (sym->name.starts_with('l') || sym->name.starts_with('L'))
+      continue;
+
     if (sym->is_imported)
       this->num_undefs++;
     else if (sym->scope == SCOPE_EXTERN)
@@ -1126,6 +1131,9 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   for (i64 i = 0; i < this->syms.size(); i++) {
     Symbol<E> *sym = this->syms[i];
     if (!sym || sym->file != this || sym->output_symtab_idx == -1)
+      continue;
+
+    if (sym->name.starts_with('l') || sym->name.starts_with('L'))
       continue;
 
     MachSym &msym = buf[sym->output_symtab_idx];
