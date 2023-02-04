@@ -330,40 +330,33 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
   // Apple did it as a size optimization. Since the code stub is now
   // shared among functions that call the same class with the same
   // message, it can reduce the output file size.
-  std::vector<Symbol<E> *> syms;
-  std::mutex mu;
+  std::vector<std::vector<Symbol<E> *>> vec(ctx.objs.size());
 
-  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    for (i64 i = 0; i < file->mach_syms.size(); i++) {
-      MachSym &msym = file->mach_syms[i];
-      if (!msym.is_extern || !msym.is_undef())
-        continue;
-
-      Symbol<E> &sym = *file->syms[i];
-      std::scoped_lock lock(sym.mu);
-
-      if (!sym.file && sym.name.starts_with("_objc_msgSend$")) {
-        sym.file = ctx.internal_obj;
-        std::scoped_lock lock(mu);
-        syms.push_back(&sym);
-      }
-    }
+  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
+    for (Symbol<E> *sym : ctx.objs[i]->syms)
+      if (!sym->file && sym->name.starts_with("_objc_msgSend$"))
+        if (!(sym->flags.fetch_or(NEEDS_OBJC_STUB) & NEEDS_OBJC_STUB))
+          vec[i].push_back(sym);
   });
+
+  std::vector<Symbol<E> *> syms = flatten(vec);
 
   if (!syms.empty()) {
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
-
-    tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
-      return a->name < b->name;
-    });
-
-    for (Symbol<E> *sym : syms)
-      ctx.internal_obj->add_msgsend_symbol(ctx, *sym);
 
     if (!ctx._objc_msgSend->file)
       Error(ctx) << "undefined symbol: _objc_msgSend";
     if (ctx._objc_msgSend->is_imported)
       ctx._objc_msgSend->flags |= NEEDS_GOT;
+
+    tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
+      return a->name < b->name;
+    });
+
+    for (Symbol<E> *sym : syms) {
+      ctx.internal_obj->add_msgsend_symbol(ctx, *sym);
+      sym->flags = 0;
+    }
   }
 }
 

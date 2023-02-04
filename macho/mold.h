@@ -316,7 +316,8 @@ enum {
   NEEDS_GOT              = 1 << 0,
   NEEDS_STUB             = 1 << 1,
   NEEDS_THREAD_PTR       = 1 << 2,
-  NEEDS_RANGE_EXTN_THUNK = 1 << 3,
+  NEEDS_OBJC_STUB        = 1 << 3,
+  NEEDS_RANGE_EXTN_THUNK = 1 << 4,
 };
 
 enum {

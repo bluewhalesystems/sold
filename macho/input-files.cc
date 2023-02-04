@@ -901,6 +901,7 @@ void ObjectFile<E>::add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym) {
   assert(sym.name.starts_with(prefix));
 
   this->syms.push_back(&sym);
+  sym.file = this;
 
   Subsection<E> *subsec = add_methname_string(ctx, sym.name.substr(prefix.size()));
   ctx.objc_stubs->methnames.push_back(subsec);

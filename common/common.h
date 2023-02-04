@@ -232,6 +232,10 @@ struct Atomic : std::atomic<T> {
     return std::atomic<T>::exchange(val, order);
   }
 
+  T fetch_or(T val, std::memory_order order = relaxed) {
+    return std::atomic<T>::fetch_or(val, order);
+  }
+
   T operator|=(T val) { return std::atomic<T>::fetch_or(val, relaxed); }
 
   bool test_and_set() {
