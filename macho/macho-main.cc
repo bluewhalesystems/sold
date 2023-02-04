@@ -297,46 +297,21 @@ template <typename E>
 static void claim_unresolved_symbols(Context<E> &ctx) {
   Timer t(ctx, "claim_unresolved_symbols");
 
+  // Handle -U
   for (std::string_view name : ctx.arg.U) {
     Symbol<E> *sym = get_symbol(ctx, name);
     if (!sym->file) {
+      sym->file = ctx.internal_obj;
+      sym->scope = SCOPE_PRIVATE_EXTERN;
       sym->is_imported = true;
+      sym->is_common = false;
       sym->is_weak = true;
+      sym->is_tlv = false;
+      sym->subsec = nullptr;
+      sym->value = 0;
+      ctx.internal_obj->syms.push_back(sym);
     }
   }
-
-  std::vector<Symbol<E> *> syms;
-  std::mutex mu;
-
-  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    for (i64 i = 0; i < file->mach_syms.size(); i++) {
-      MachSym &msym = file->mach_syms[i];
-      if (!msym.is_extern || !msym.is_undef())
-        continue;
-
-      Symbol<E> &sym = *file->syms[i];
-      std::scoped_lock lock(sym.mu);
-
-      if (sym.is_imported) {
-        if (!sym.file ||
-            (!sym.file->is_dylib && file->priority < sym.file->priority)) {
-          sym.file = file;
-          sym.scope = SCOPE_PRIVATE_EXTERN;
-          sym.is_imported = true;
-          sym.subsec = nullptr;
-          sym.value = 0;
-          sym.is_common = false;
-        }
-        continue;
-      }
-
-      if (!sym.file && sym.name.starts_with("_objc_msgSend$")) {
-        sym.file = ctx.internal_obj;
-        std::scoped_lock lock(mu);
-        syms.push_back(&sym);
-      }
-    }
-  });
 
   // _objc_msgSend is the underlying function of the Objective-C's dynamic
   // message dispatching. The function takes an receiver object and an
@@ -355,6 +330,26 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
   // Apple did it as a size optimization. Since the code stub is now
   // shared among functions that call the same class with the same
   // message, it can reduce the output file size.
+  std::vector<Symbol<E> *> syms;
+  std::mutex mu;
+
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    for (i64 i = 0; i < file->mach_syms.size(); i++) {
+      MachSym &msym = file->mach_syms[i];
+      if (!msym.is_extern || !msym.is_undef())
+        continue;
+
+      Symbol<E> &sym = *file->syms[i];
+      std::scoped_lock lock(sym.mu);
+
+      if (!sym.file && sym.name.starts_with("_objc_msgSend$")) {
+        sym.file = ctx.internal_obj;
+        std::scoped_lock lock(mu);
+        syms.push_back(&sym);
+      }
+    }
+  });
+
   if (!syms.empty()) {
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
 
