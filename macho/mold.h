@@ -321,9 +321,9 @@ enum {
 };
 
 enum {
-  SCOPE_LOCAL,          // input file scope
-  SCOPE_PRIVATE_EXTERN, // output file scope (non-exported symbol)
-  SCOPE_EXTERN,         // global scope (exported symbol)
+  SCOPE_LOCAL,  // input file visibility
+  SCOPE_MODULE, // output file visibility (non-exported symbol)
+  SCOPE_GLOBAL, // global visibility (exported symbol)
 };
 
 template <typename E>
@@ -345,7 +345,7 @@ struct Symbol {
 
   Atomic<u8> flags = 0;
 
-  u8 scope : 2 = SCOPE_LOCAL;
+  u8 visibility : 2 = SCOPE_LOCAL;
   bool is_imported : 1 = false;
   bool is_common : 1 = false;
   bool is_weak : 1 = false;

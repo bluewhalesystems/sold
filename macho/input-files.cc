@@ -16,7 +16,7 @@ template <typename E>
 void InputFile<E>::clear_symbols() {
   for (Symbol<E> *sym : syms) {
     if (__atomic_load_n(&sym->file, __ATOMIC_ACQUIRE) == this) {
-      sym->scope = SCOPE_LOCAL;
+      sym->visibility = SCOPE_LOCAL;
       sym->is_imported = false;
       sym->is_common = false;
       sym->is_weak = false;
@@ -371,7 +371,7 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
     this->syms.push_back(&sym);
 
     sym.file = this;
-    sym.scope = SCOPE_LOCAL;
+    sym.visibility = SCOPE_LOCAL;
     sym.is_common = false;
     sym.is_weak = false;
     sym.is_tlv = false;
@@ -618,7 +618,7 @@ void ObjectFile<E>::parse_mod_init_func(Context<E> &ctx) {
 
     Symbol<E> *sym = this->syms[r.idx];
 
-    if (sym->scope != SCOPE_LOCAL)
+    if (sym->visibility != SCOPE_LOCAL)
       Fatal(ctx) << *this << ": __mod_init_func: non-local initializer function";
 
     init_functions.push_back(sym);
@@ -664,18 +664,18 @@ static u64 get_rank(Symbol<E> &sym) {
 
 template <typename E>
 void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
-  auto is_private_extern = [&](MachSym &msym) {
+  auto is_module_local = [&](MachSym &msym) {
     return this->is_hidden || msym.is_private_extern ||
            ((msym.desc & N_WEAK_REF) && (msym.desc & N_WEAK_DEF));
   };
 
   auto merge_scope = [&](Symbol<E> &sym, MachSym &msym) {
-    // If at least one symbol defines it as an EXTERN symbol,
-    // the result is an EXTERN symbol instead of PRIVATE_EXTERN,
-    // so that the symbol is exported.
-    if (sym.scope == SCOPE_EXTERN)
-      return SCOPE_EXTERN;
-    return is_private_extern(msym) ? SCOPE_PRIVATE_EXTERN : SCOPE_EXTERN;
+    // If at least one symbol defines it as an GLOBAL symbol, the
+    // result is an GLOBAL symbol instead of MODULE, so that the
+    // symbol is exported.
+    if (sym.visibility == SCOPE_GLOBAL)
+      return SCOPE_GLOBAL;
+    return is_module_local(msym) ? SCOPE_MODULE : SCOPE_GLOBAL;
   };
 
   for (i64 i = 0; i < this->syms.size(); i++) {
@@ -687,7 +687,7 @@ void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
     std::scoped_lock lock(sym.mu);
     bool is_weak = (msym.desc & N_WEAK_DEF);
 
-    sym.scope = merge_scope(sym, msym);
+    sym.visibility = merge_scope(sym, msym);
 
     if (get_rank(this, msym.is_common(), is_weak) < get_rank(sym)) {
       sym.file = this;
@@ -1042,7 +1042,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
 
     if (sym->is_imported)
       this->num_undefs++;
-    else if (sym->scope == SCOPE_EXTERN)
+    else if (sym->visibility == SCOPE_GLOBAL)
       this->num_globals++;
     else
       this->num_locals++;
@@ -1084,7 +1084,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   //
   // The following N_OSO symbol specifies a object file path, which is
   // followed by N_FUN, N_STSYM or N_GSYM symbols for functions,
-  // file-scope global variables and global variables, respectively.
+  // file-visibility global variables and global variables, respectively.
   //
   // N_FUN symbol is always emitted as a pair. The first N_FUN symbol
   // specifies the start address of a function, and the second specifies
@@ -1119,7 +1119,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
       stab[stab_idx + 1].sect = sym->subsec->input_size;
       stab_idx += 2;
     } else {
-      stab[stab_idx].n_type = (sym->scope == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
+      stab[stab_idx].n_type = (sym->visibility == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
       stab_idx++;
     }
   }
@@ -1136,7 +1136,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
 
     MachSym &msym = buf[sym->output_symtab_idx];
     msym.stroff = pos[i];
-    msym.is_extern = (sym->is_imported || sym->scope == SCOPE_EXTERN);
+    msym.is_extern = (sym->is_imported || sym->visibility == SCOPE_GLOBAL);
     msym.type = (sym->is_imported ? N_UNDF : N_SECT);
 
     if (sym->is_imported)
@@ -1398,7 +1398,7 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
 
     if (get_rank(this, false, false) < get_rank(sym)) {
       sym.file = this;
-      sym.scope = SCOPE_LOCAL;
+      sym.visibility = SCOPE_LOCAL;
       sym.is_imported = true;
       sym.is_weak = this->is_weak || (flags & EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
       sym.no_dead_strip = false;

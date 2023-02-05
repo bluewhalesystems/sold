@@ -97,9 +97,9 @@ static void handle_exported_symbols_list(Context<E> &ctx) {
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (Symbol<E> *sym : file->syms)
       if (sym && sym->file == file)
-        if (sym->scope == SCOPE_EXTERN || sym->scope == SCOPE_PRIVATE_EXTERN)
-          sym->scope = ctx.arg.exported_symbols_list.find(sym->name)
-            ? SCOPE_EXTERN : SCOPE_PRIVATE_EXTERN;
+        if (sym->visibility == SCOPE_GLOBAL || sym->visibility == SCOPE_MODULE)
+          sym->visibility = ctx.arg.exported_symbols_list.find(sym->name)
+            ? SCOPE_GLOBAL : SCOPE_MODULE;
   });
 }
 
@@ -112,9 +112,9 @@ static void handle_unexported_symbols_list(Context<E> &ctx) {
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (Symbol<E> *sym : file->syms)
       if (sym && sym->file == file)
-        if (sym->scope == SCOPE_EXTERN &&
+        if (sym->visibility == SCOPE_GLOBAL &&
             ctx.arg.unexported_symbols_list.find(sym->name))
-          sym->scope = SCOPE_PRIVATE_EXTERN;
+          sym->visibility = SCOPE_MODULE;
   });
 }
 
@@ -140,7 +140,7 @@ static void create_internal_file(Context<E> &ctx) {
   switch (ctx.output_type) {
   case MH_EXECUTE: {
     add(ctx.__mh_execute_header);
-    ctx.__mh_execute_header->scope = SCOPE_EXTERN;
+    ctx.__mh_execute_header->visibility = SCOPE_GLOBAL;
     ctx.__mh_execute_header->referenced_dynamically = true;
     ctx.__mh_execute_header->value = ctx.arg.pagezero_size;
     break;
@@ -302,7 +302,7 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
     Symbol<E> *sym = get_symbol(ctx, name);
     if (!sym->file) {
       sym->file = ctx.internal_obj;
-      sym->scope = SCOPE_PRIVATE_EXTERN;
+      sym->visibility = SCOPE_MODULE;
       sym->is_imported = true;
       sym->is_common = false;
       sym->is_weak = true;

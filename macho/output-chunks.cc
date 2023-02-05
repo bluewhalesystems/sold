@@ -1091,7 +1091,7 @@ void ExportSection<E>::compute_size(Context<E> &ctx) {
 
   for (ObjectFile<E> *file : ctx.objs)
     for (Symbol<E> *sym : file->syms)
-      if (sym && sym->file == file && sym->scope == SCOPE_EXTERN)
+      if (sym && sym->file == file && sym->visibility == SCOPE_GLOBAL)
         enc.entries.push_back({sym->name, get_flags(*sym),
                                sym->get_addr(ctx) - ctx.mach_hdr.hdr.addr});
 
@@ -1211,7 +1211,7 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
       if (sym && sym->file == file && sym->output_symtab_idx == -2) {
         if (sym->is_imported)
           sym->output_symtab_idx = undefs++;
-        else if (sym->scope == SCOPE_EXTERN)
+        else if (sym->visibility == SCOPE_GLOBAL)
           sym->output_symtab_idx = globals++;
         else
           sym->output_symtab_idx = locals++;

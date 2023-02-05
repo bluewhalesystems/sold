@@ -21,7 +21,7 @@ static void collect_root_set(Context<E> &ctx,
     if (sym->referenced_dynamically)
       return true;
     if (ctx.output_type == MH_DYLIB || ctx.output_type == MH_BUNDLE)
-      if (sym->scope == SCOPE_EXTERN)
+      if (sym->visibility == SCOPE_GLOBAL)
         return true;
     return false;
   };
