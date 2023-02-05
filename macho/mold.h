@@ -347,6 +347,7 @@ struct Symbol {
 
   u8 visibility : 2 = SCOPE_LOCAL;
   bool is_imported : 1 = false;
+  bool is_exported : 1 = false;
   bool is_common : 1 = false;
   bool is_weak : 1 = false;
   bool is_tlv : 1 = false;

@@ -119,6 +119,43 @@ static void handle_unexported_symbols_list(Context<E> &ctx) {
 }
 
 template <typename E>
+static void compute_import_export(Context<E> &ctx) {
+  // Compute is_imported and is_exported values
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    for (Symbol<E> *sym : file->syms) {
+      if (sym->visibility != SCOPE_GLOBAL)
+        continue;
+
+      // If we are creating a dylib, all global symbols are exported by default.
+      if (sym->file == file && ctx.output_type != MH_EXECUTE) {
+        std::scoped_lock lock(sym->mu);
+        sym->is_exported = true;
+        continue;
+      }
+
+      // If we are using a dylib symbol, we need to import it.
+      if (sym->file != file && sym->file->is_dylib) {
+        std::scoped_lock lock(sym->mu);
+        sym->is_imported = true;
+      }
+    }
+  });
+
+  // If we are creating an executable, we want to export symbols
+  // referenced by dylibs.
+  if (ctx.output_type != MH_EXECUTE) {
+    tbb::parallel_for_each(ctx.dylibs, [&](DylibFile<E> *file) {
+      for (Symbol<E> *sym : file->syms) {
+        if (sym->file && !sym->file->is_dylib && sym->visibility == SCOPE_GLOBAL) {
+          std::scoped_lock lock(sym->mu);
+          sym->is_exported = true;
+        }
+      }
+    });
+  }
+}
+
+template <typename E>
 static void create_internal_file(Context<E> &ctx) {
   Timer t(ctx, "create_internal_file");
 
@@ -346,8 +383,11 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
 
     if (!ctx._objc_msgSend->file)
       Error(ctx) << "undefined symbol: _objc_msgSend";
-    if (ctx._objc_msgSend->is_imported)
+
+    if (ctx._objc_msgSend->file->is_dylib) {
+      ctx._objc_msgSend->is_imported = true;
       ctx._objc_msgSend->flags |= NEEDS_GOT;
+    }
 
     tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
       return a->name < b->name;
@@ -1158,13 +1198,16 @@ int macho_main(int argc, char **argv) {
   if (ctx.output_type == MH_EXECUTE && !ctx.arg.entry->file)
     Error(ctx) << "undefined entry point symbol: " << *ctx.arg.entry;
 
+  create_internal_file(ctx);
+
   // Handle -exported_symbol and -exported_symbols_list
   handle_exported_symbols_list(ctx);
 
   // Handle -unexported_symbol and -unexported_symbols_list
   handle_unexported_symbols_list(ctx);
 
-  create_internal_file(ctx);
+  // Set values to is_imported and is_exported
+  compute_import_export(ctx);
 
   if (ctx.arg.trace) {
     for (ObjectFile<E> *file : ctx.objs)

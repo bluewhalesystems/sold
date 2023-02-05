@@ -18,6 +18,7 @@ void InputFile<E>::clear_symbols() {
     if (__atomic_load_n(&sym->file, __ATOMIC_ACQUIRE) == this) {
       sym->visibility = SCOPE_LOCAL;
       sym->is_imported = false;
+      sym->is_exported = false;
       sym->is_common = false;
       sym->is_weak = false;
       sym->is_tlv = false;
@@ -676,7 +677,6 @@ void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
     if (get_rank(this, msym.is_common(), is_weak) < get_rank(sym)) {
       sym.file = this;
       sym.visibility = SCOPE_MODULE;
-      sym.is_imported = false;
       sym.is_weak = is_weak;
       sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
 
@@ -779,7 +779,6 @@ void ObjectFile<E>::convert_common_symbols(Context<E> &ctx) {
 
       subsections.emplace_back(subsec);
 
-      sym.is_imported = false;
       sym.is_weak = false;
       sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
       sym.subsec = subsec;
@@ -1394,7 +1393,6 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
     if (get_rank(this, false, false) < get_rank(sym)) {
       sym.file = this;
       sym.visibility = SCOPE_GLOBAL;
-      sym.is_imported = true;
       sym.is_weak = this->is_weak || (flags & EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
       sym.no_dead_strip = false;
       sym.subsec = nullptr;
