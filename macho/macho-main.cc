@@ -645,8 +645,14 @@ template <typename E>
 static void export_symbols(Context<E> &ctx) {
   Timer t(ctx, "export_symbols");
 
-  if (ctx.stub_helper)
-    ctx.got.add(ctx, get_symbol(ctx, "dyld_stub_binder"));
+  if (ctx.stub_helper) {
+    Symbol<E> &sym = *ctx.dyld_stub_binder;
+    if (!sym.file)
+      Error(ctx) << "unresolved symbol: dyld_stub_binder";
+    if (sym.file->is_dylib)
+      sym.is_imported = true;
+    ctx.got.add(ctx, &sym);
+  }
 
   std::vector<InputFile<E> *> files;
   append(files, ctx.objs);
