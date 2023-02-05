@@ -47,10 +47,18 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
   if (get_file_type(ctx, this->mf) == FileType::LLVM_BITCODE) {
     // Open an compiler IR file
     load_lto_plugin(ctx);
-    this->lto_module =
-      ctx.lto.module_create_from_memory(this->mf->data, this->mf->size);
-    if (!this->lto_module)
-      Fatal(ctx) << *this << ": lto_module_create_from_memory failed";
+
+    // It looks like module_create_from_memory is not thread-safe,
+    // so protect it with a lock.
+    {
+      static std::mutex mu;
+      std::scoped_lock lock(mu);
+
+      this->lto_module =
+        ctx.lto.module_create_from_memory(this->mf->data, this->mf->size);
+      if (!this->lto_module)
+        Fatal(ctx) << *this << ": lto_module_create_from_memory failed";
+    }
 
     // Read a symbol table
     parse_lto_symbols(ctx);
