@@ -97,7 +97,7 @@ static void handle_exported_symbols_list(Context<E> &ctx) {
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (Symbol<E> *sym : file->syms)
       if (sym && sym->file == file)
-        if (sym->visibility == SCOPE_GLOBAL || sym->visibility == SCOPE_MODULE)
+        if (sym->visibility != SCOPE_LOCAL)
           sym->visibility = ctx.arg.exported_symbols_list.find(sym->name)
             ? SCOPE_GLOBAL : SCOPE_MODULE;
   });

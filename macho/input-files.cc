@@ -664,20 +664,6 @@ static u64 get_rank(Symbol<E> &sym) {
 
 template <typename E>
 void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
-  auto is_module_local = [&](MachSym &msym) {
-    return this->is_hidden || msym.is_private_extern ||
-           ((msym.desc & N_WEAK_REF) && (msym.desc & N_WEAK_DEF));
-  };
-
-  auto merge_scope = [&](Symbol<E> &sym, MachSym &msym) {
-    // If at least one symbol defines it as an GLOBAL symbol, the
-    // result is an GLOBAL symbol instead of MODULE, so that the
-    // symbol is exported.
-    if (sym.visibility == SCOPE_GLOBAL)
-      return SCOPE_GLOBAL;
-    return is_module_local(msym) ? SCOPE_MODULE : SCOPE_GLOBAL;
-  };
-
   for (i64 i = 0; i < this->syms.size(); i++) {
     MachSym &msym = mach_syms[i];
     if (!msym.is_extern || msym.is_undef())
@@ -687,10 +673,9 @@ void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
     std::scoped_lock lock(sym.mu);
     bool is_weak = (msym.desc & N_WEAK_DEF);
 
-    sym.visibility = merge_scope(sym, msym);
-
     if (get_rank(this, msym.is_common(), is_weak) < get_rank(sym)) {
       sym.file = this;
+      sym.visibility = SCOPE_MODULE;
       sym.is_imported = false;
       sym.is_weak = is_weak;
       sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
@@ -745,6 +730,11 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
                                  std::function<void(ObjectFile<E> *)> feeder) {
   assert(this->is_alive);
 
+  auto is_module_local = [&](MachSym &msym) {
+    return this->is_hidden || msym.is_private_extern ||
+           ((msym.desc & N_WEAK_REF) && (msym.desc & N_WEAK_DEF));
+  };
+
   for (i64 i = 0; i < this->syms.size(); i++) {
     MachSym &msym = mach_syms[i];
     if (!msym.is_extern)
@@ -752,6 +742,11 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
 
     Symbol<E> &sym = *this->syms[i];
     std::scoped_lock lock(sym.mu);
+
+    // If at least one symbol defines it as an GLOBAL symbol, the result
+    // is an GLOBAL symbol instead of MODULE, so that the symbol is exported.
+    if (!msym.is_undef() && !is_module_local(msym))
+      sym.visibility = SCOPE_GLOBAL;
 
     if (InputFile<E> *file = sym.file)
       if (msym.is_undef() || (msym.is_common() && !sym.is_common))
@@ -1398,7 +1393,7 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
 
     if (get_rank(this, false, false) < get_rank(sym)) {
       sym.file = this;
-      sym.visibility = SCOPE_LOCAL;
+      sym.visibility = SCOPE_GLOBAL;
       sym.is_imported = true;
       sym.is_weak = this->is_weak || (flags & EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
       sym.no_dead_strip = false;
