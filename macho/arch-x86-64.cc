@@ -126,18 +126,17 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file,
 
   for (i64 i = 0; i < hdr.nreloc; i++) {
     MachRel &r = rels[i];
+    i64 addend = read_addend(file.mf->data + hdr.offset, r) +
+                 get_reloc_addend(r.type);
 
     vec.push_back(Relocation<E>{
       .offset = r.offset,
       .type = (u8)r.type,
       .size = (u8)(1 << r.p2size),
+      .is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR),
     });
 
     Relocation<E> &rel = vec.back();
-    rel.is_subtracted = (i > 0 && rels[i - 1].type == X86_64_RELOC_SUBTRACTOR);
-
-    i64 addend = read_addend(file.mf->data + hdr.offset, r) +
-                 get_reloc_addend(r.type);
 
     if (r.is_extern) {
       rel.target = file.syms[r.idx];
@@ -162,10 +161,10 @@ template <>
 void Subsection<E>::scan_relocations(Context<E> &ctx) {
   for (Relocation<E> &r : get_rels()) {
     Symbol<E> *sym = r.sym();
-    if (!sym)
+    if (!sym || !sym->file)
       continue;
 
-    if (sym->is_imported && sym->file->is_dylib)
+    if (sym->file->is_dylib)
       ((DylibFile<E> *)sym->file)->is_alive = true;
 
     if ((r.type == X86_64_RELOC_TLV) != sym->is_tlv)

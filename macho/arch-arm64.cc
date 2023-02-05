@@ -189,10 +189,10 @@ read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
       .offset = r.offset,
       .type = (u8)r.type,
       .size = (u8)(1 << r.p2size),
+      .is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR),
     });
 
     Relocation<E> &rel = vec.back();
-    rel.is_subtracted = (i > 0 && rels[i - 1].type == ARM64_RELOC_SUBTRACTOR);
 
     // A relocation refers to either a symbol or a section
     if (r.is_extern) {
@@ -218,10 +218,10 @@ template <>
 void Subsection<E>::scan_relocations(Context<E> &ctx) {
   for (Relocation<E> &r : get_rels()) {
     Symbol<E> *sym = r.sym();
-    if (!sym)
+    if (!sym || !sym->file)
       continue;
 
-    if (sym->is_imported && sym->file->is_dylib)
+    if (sym->file->is_dylib)
       ((DylibFile<E> *)sym->file)->is_alive = true;
 
     bool is_tlv_reloc = (r.type == ARM64_RELOC_TLVP_LOAD_PAGE21 ||
