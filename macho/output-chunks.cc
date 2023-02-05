@@ -799,14 +799,22 @@ struct BindEntry {
 };
 
 template <typename E>
-static i32 get_dylib_idx(InputFile<E> *file) {
-  if (file->is_dylib)
-    return ((DylibFile<E> *)file)->dylib_idx;
+static i32 get_dylib_idx(Context<E> &ctx, Symbol<E> &sym) {
+  assert(sym.is_imported);
+
+  if (ctx.arg.flat_namespace)
+    return BIND_SPECIAL_DYLIB_FLAT_LOOKUP;
+
+  if (sym.file->is_dylib)
+    return ((DylibFile<E> *)sym.file)->dylib_idx;
+
+  assert(!ctx.arg.U.empty());
   return BIND_SPECIAL_DYLIB_FLAT_LOOKUP;
 }
 
 template <typename E>
-std::vector<u8> encode_bind_entries(std::vector<BindEntry<E>> &bindings) {
+std::vector<u8>
+encode_bind_entries(Context<E> &ctx, std::vector<BindEntry<E>> &bindings) {
   std::vector<u8> buf;
   buf.push_back(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER);
 
@@ -822,7 +830,7 @@ std::vector<u8> encode_bind_entries(std::vector<BindEntry<E>> &bindings) {
     BindEntry<E> *last = (i == 0) ? nullptr : &bindings[i - 1];
 
     if (!last || b.sym->file != last->sym->file) {
-      i64 idx = get_dylib_idx(b.sym->file);
+      i64 idx = get_dylib_idx(ctx, *b.sym);
       if (idx < 0) {
         buf.push_back(BIND_OPCODE_SET_DYLIB_SPECIAL_IMM |
                       (idx & BIND_IMMEDIATE_MASK));
@@ -895,7 +903,7 @@ void BindSection<E>::compute_size(Context<E> &ctx) {
       bindings.emplace_back(sym, ctx.data_seg->seg_idx,
                             sym->get_tlv_addr(ctx) - ctx.data_seg->cmd.vmaddr, 0);
 
-  contents = encode_bind_entries(bindings);
+  contents = encode_bind_entries(ctx, bindings);
   this->hdr.size = contents.size();
 }
 
@@ -910,7 +918,7 @@ void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym, i64 idx) {
     contents.push_back(byte);
   };
 
-  i64 dylib_idx = get_dylib_idx(sym.file);
+  i64 dylib_idx = get_dylib_idx(ctx, sym);
 
   if (dylib_idx < 0) {
     emit(BIND_OPCODE_SET_DYLIB_SPECIAL_IMM | (dylib_idx & BIND_IMMEDIATE_MASK));
@@ -1762,7 +1770,9 @@ void ChainedFixupsSection<E>::write_imports(Context<E> &ctx) {
   for (i64 i = 0; i < dynsyms.size(); i++) {
     Symbol<E> &sym = *dynsyms[i].sym;
 
-    if (sym.file->is_dylib)
+    if (ctx.arg.flat_namespace)
+      imports[i].lib_ordinal = BIND_SPECIAL_DYLIB_FLAT_LOOKUP;
+    else if (sym.file->is_dylib)
       imports[i].lib_ordinal = ((DylibFile<E> *)sym.file)->dylib_idx;
     else
       imports[i].lib_ordinal = BIND_SPECIAL_DYLIB_WEAK_LOOKUP;

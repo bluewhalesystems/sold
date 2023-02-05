@@ -36,9 +36,26 @@ This is contrary to ELF in which dynamic symbols are resolved only by
 name. In ELF, dynamic symbols can be resolved by any dynamic library as
 long as their names match.
 
-Mach-O's dynamic symbols are stored as a trie so that symbols' common
-prefixes are shared in a file. In ELF, dynamic symbol strings are just a
-run of NUL-terminated strings. So, Mach-O is more complicated but compact.
+If a dylib in a special value `BIND_SPECIAL_DYLIB_FLAT_LOOKUP`, the symbol
+name is looked up from all dylibs at runtime. This gives Mach-O the
+semantics that are the same as the ELF's flat namespace. This special value
+is used in the following rare occasions:
+
+1. If a symbol name specified as an argument for `-U` is missing at
+   link-time, the symbol is promoted to a dynamic symbol so that it'll get
+   another chance to be resolved at load-time. Since we don't know the
+   library name for such symbol, we'll set `BIND_SPECIAL_DYLIB_FLAT_LOOKUP`
+   as a library identifier instead.
+
+2. If `-flat_namespace` is given, all dynamic symbols are exported without
+   specifying their corresponding library names. This option gives the
+   ELF semantics to Mach-O programs.
+
+The other difference between Mach-O and ELF Is that Mach-O's dynamic
+symbols are stored in a trie so that symbols' common prefixes are shared
+in a file. In ELF, dynamic symbol strings are just a run of NUL-terminated
+strings. So, Mach-O's import table is more complicated but compact than
+ELF's table.
 
 ## Lazy function symbol resolution
 

@@ -346,13 +346,21 @@ struct Symbol {
   Atomic<u8> flags = 0;
 
   u8 visibility : 2 = SCOPE_LOCAL;
-  bool is_imported : 1 = false;
-  bool is_exported : 1 = false;
   bool is_common : 1 = false;
   bool is_weak : 1 = false;
   bool is_tlv : 1 = false;
   bool no_dead_strip : 1 = false;
   bool referenced_dynamically : 1 = false;
+
+  // `is_exported` is true if this symbol is exported from this Mach-O
+  // file. `is_imported` is true if this symbol is resolved by the dynamic
+  // loader at load time.
+  //
+  // Note that if `-flat_namespace` is given (which is rare), both are
+  // true. In that case, dynamic symbols are resolved in the same
+  // semantics as ELF's.
+  bool is_imported : 1 = false;
+  bool is_exported : 1 = false;
 
   union {
     // For range extension thunks. Used by OutputSection::compute_size().
@@ -1021,6 +1029,7 @@ struct Context {
     bool export_dynamic = false;
     bool fatal_warnings = false;
     bool fixup_chains = false;
+    bool flat_namespace = false;
     bool function_starts = true;
     bool init_offsets = false;
     bool mark_dead_strippable_dylib = false;
@@ -1165,12 +1174,12 @@ std::ostream &operator<<(std::ostream &out, const InputSection<E> &sec) {
 
 template <typename E>
 u64 Symbol<E>::get_addr(Context<E> &ctx) const {
+  if (stub_idx != -1)
+    return ctx.stubs.hdr.addr + stub_idx * E::stub_size;
   if (subsec) {
     assert(subsec->is_alive);
     return subsec->get_addr(ctx) + value;
   }
-  if (stub_idx != -1)
-    return ctx.stubs.hdr.addr + stub_idx * E::stub_size;
   return value;
 }
 

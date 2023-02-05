@@ -130,6 +130,8 @@ static void compute_import_export(Context<E> &ctx) {
       if (sym->file == file && ctx.output_type != MH_EXECUTE) {
         std::scoped_lock lock(sym->mu);
         sym->is_exported = true;
+        if (ctx.arg.flat_namespace)
+          sym->is_imported = true;
         continue;
       }
 
@@ -339,7 +341,7 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
     Symbol<E> *sym = get_symbol(ctx, name);
     if (!sym->file) {
       sym->file = ctx.internal_obj;
-      sym->visibility = SCOPE_MODULE;
+      sym->visibility = SCOPE_GLOBAL;
       sym->is_imported = true;
       sym->is_common = false;
       sym->is_weak = true;

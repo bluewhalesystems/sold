@@ -60,6 +60,7 @@ Options:
   -filelist <FILE>[,<DIR>]    Specify the list of input file names
   -fixup_chains               Emit chained fixups for page-in linking
     -no_fixup_chains
+  -flat_namespace             Use the traditional single level namespace
   -final_output <NAME>
   -force_load <FILE>          Include all objects from a given static archive
   -framework <NAME>,[,<SUFFIX>]
@@ -408,6 +409,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_arg("-filelist")) {
       remaining.push_back("-filelist");
       remaining.push_back(std::string(arg));
+    } else if (read_flag("-flat_namespace")) {
+      ctx.arg.flat_namespace = true;
     } else if (read_arg("-final_output")) {
       ctx.arg.final_output = arg;
     } else if (read_flag("-fixup_chains")) {

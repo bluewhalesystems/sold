@@ -1130,26 +1130,31 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
 
     MachSym &msym = buf[sym->output_symtab_idx];
     msym.stroff = pos[i];
-    msym.is_extern = (sym->is_imported || sym->visibility == SCOPE_GLOBAL);
-    msym.type = (sym->is_imported ? N_UNDF : N_SECT);
+    msym.is_extern = (sym->visibility == SCOPE_GLOBAL);
 
-    if (sym->is_imported)
-      msym.sect = N_UNDF;
-    else if (sym->subsec)
+    if (sym->subsec && sym->subsec->is_alive) {
+      msym.type = N_SECT;
       msym.sect = sym->subsec->isec->osec.sect_idx;
-    else if (sym == ctx.__mh_execute_header)
-      msym.sect = ctx.text->sect_idx;
-    else if (sym == ctx.__dyld_private || sym == ctx.__mh_dylib_header ||
-             sym == ctx.__mh_bundle_header || sym == ctx.___dso_handle)
+      msym.value = sym->get_addr(ctx);
+    } else if (sym == ctx.__dyld_private || sym == ctx.__mh_dylib_header ||
+               sym == ctx.__mh_bundle_header || sym == ctx.___dso_handle) {
+      msym.type = N_SECT;
       msym.sect = ctx.data->sect_idx;
-    else
+      msym.value = 0;
+    } else if (sym == ctx.__mh_execute_header) {
+      msym.type = N_SECT;
+      msym.sect = ctx.text->sect_idx;
+      msym.value = 0;
+    } else if (sym->is_imported) {
+      msym.type = N_UNDF;
+      msym.sect = N_UNDF;
+    } else {
+      msym.type = N_ABS;
       msym.sect = N_ABS;
+    }
 
     if (sym->referenced_dynamically)
       msym.desc = REFERENCED_DYNAMICALLY;
-
-    if (!sym->is_imported && (!sym->subsec || sym->subsec->is_alive))
-      msym.value = sym->get_addr(ctx);
   }
 }
 
