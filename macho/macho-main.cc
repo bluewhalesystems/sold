@@ -143,18 +143,15 @@ static void compute_import_export(Context<E> &ctx) {
     }
   });
 
-  // If we are creating an executable, we want to export symbols
-  // referenced by dylibs.
-  if (ctx.output_type != MH_EXECUTE) {
-    tbb::parallel_for_each(ctx.dylibs, [&](DylibFile<E> *file) {
-      for (Symbol<E> *sym : file->syms) {
-        if (sym->file && !sym->file->is_dylib && sym->visibility == SCOPE_GLOBAL) {
-          std::scoped_lock lock(sym->mu);
-          sym->is_exported = true;
-        }
+  // We want to export symbols referenced by dylibs.
+  tbb::parallel_for_each(ctx.dylibs, [&](DylibFile<E> *file) {
+    for (Symbol<E> *sym : file->syms) {
+      if (sym->file && !sym->file->is_dylib && sym->visibility == SCOPE_GLOBAL) {
+        std::scoped_lock lock(sym->mu);
+        sym->is_exported = true;
       }
-    });
-  }
+    }
+  });
 }
 
 template <typename E>
