@@ -1175,12 +1175,22 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
 }
 
 template <typename E>
+static bool is_dead_strippable(Context<E> &ctx, MappedFile<Context<E>> *mf) {
+  return get_file_type(ctx, mf) == FileType::MACH_DYLIB &&
+         (((MachHeader *)mf->data)->flags & MH_DEAD_STRIPPABLE_DYLIB);
+}
+
+template <typename E>
 DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
     : InputFile<E>(mf) {
   this->is_dylib = true;
-  this->is_alive = (ctx.needed_l || !ctx.arg.dead_strip_dylibs);
   this->is_weak = ctx.weak_l;
   this->is_reexported = ctx.reexport_l;
+
+  // Even if -dead_strip was not given, a dylib with
+  // MH_DEAD_STRIPPABLE_DYLIB is dead-stripped if unreferenced.
+  bool dead_strippable = ctx.arg.dead_strip_dylibs || is_dead_strippable(ctx, mf);
+  this->is_alive = ctx.needed_l || !dead_strippable;
 }
 
 template <typename E>
