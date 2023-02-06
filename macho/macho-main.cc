@@ -231,17 +231,31 @@ static void create_internal_file(Context<E> &ctx) {
     add(get_symbol(ctx, name));
 }
 
-// Remove unreferenced subsections to eliminate code and data
-// referenced by duplicated weakdef symbols.
+// Some pieces of code or data such as C++ inline functions or
+// instantiated templates can be defined by multiple input files.
+// We want to deduplicate them so that only one copy of them is
+// included into the output file.
+//
+// In Mach-O, such code or data are simply defined as weak symbols to
+// allow multiple definitions. In this function, we eliminate
+// subsections that are referenced by weak symbols that are overridden
+// by other files' instances.
 template <typename E>
 static void remove_unreferenced_subsections(Context<E> &ctx) {
   Timer t(ctx, "remove_unreferenced_subsections");
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    if (file == ctx.internal_obj)
+      return;
+
+    if (!(((MachHeader *)file->mf->data)->flags & MH_SUBSECTIONS_VIA_SYMBOLS))
+      return;
+
     for (i64 i = 0; i < file->mach_syms.size(); i++) {
       MachSym &msym = file->mach_syms[i];
       Symbol<E> &sym = *file->syms[i];
-      if (sym.file != file && (msym.type == N_SECT) && (msym.desc & N_WEAK_DEF))
+      if (sym.file != file && (msym.type == N_SECT) &&
+          (msym.desc & N_WEAK_DEF) && !(msym.desc & N_ALT_ENTRY))
         file->sym_to_subsec[i]->is_alive = false;
     }
   });
