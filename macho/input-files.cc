@@ -1045,6 +1045,9 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
     if (sym->name.starts_with('l') || sym->name.starts_with('L'))
       continue;
 
+    if (ctx.arg.x && sym->visibility == SCOPE_LOCAL)
+      continue;
+
     if (sym->is_imported)
       this->num_undefs++;
     else if (sym->visibility == SCOPE_GLOBAL)
@@ -1139,6 +1142,9 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   for (i64 i = 0; i < this->syms.size(); i++) {
     Symbol<E> *sym = this->syms[i];
     if (!sym || sym->file != this || sym->output_symtab_idx == -1)
+      continue;
+
+    if (ctx.arg.x && sym->visibility == SCOPE_LOCAL)
       continue;
 
     MachSym &msym = buf[sym->output_symtab_idx];

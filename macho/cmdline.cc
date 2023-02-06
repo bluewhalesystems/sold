@@ -117,7 +117,8 @@ Options:
   -v                          Report version information
   -weak_framework <NAME>[,<SUFFIX>]
                               Search for a given framework
-  -weak-l<LIB>                Search for a given library)";
+  -weak-l<LIB>                Search for a given library
+  -x                          Strip local symbols)";
 
 template <typename E>
 static i64 parse_platform(Context<E> &ctx, std::string_view arg) {
@@ -537,6 +538,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_joined("-weak-l")) {
       remaining.push_back("-weak-l");
       remaining.push_back(std::string(arg));
+    } else if (read_flag("-x")) {
+      ctx.arg.x = true;
     } else if (read_flag("--no-call-graph-profile-sort")) {
     } else if (read_flag("--icf=none")) {
     } else {
