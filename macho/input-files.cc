@@ -1160,9 +1160,6 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
       msym.type = N_ABS;
       msym.sect = N_ABS;
     }
-
-    if (sym->referenced_dynamically)
-      msym.desc = REFERENCED_DYNAMICALLY;
   }
 }
 

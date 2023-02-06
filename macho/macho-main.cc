@@ -195,7 +195,7 @@ static void create_internal_file(Context<E> &ctx) {
   case MH_EXECUTE: {
     add(ctx.__mh_execute_header);
     ctx.__mh_execute_header->visibility = SCOPE_GLOBAL;
-    ctx.__mh_execute_header->referenced_dynamically = true;
+    ctx.__mh_execute_header->is_exported = true;
     ctx.__mh_execute_header->value = ctx.arg.pagezero_size;
     break;
   }

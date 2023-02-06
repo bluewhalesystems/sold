@@ -350,7 +350,6 @@ struct Symbol {
   bool is_weak : 1 = false;
   bool is_tlv : 1 = false;
   bool no_dead_strip : 1 = false;
-  bool referenced_dynamically : 1 = false;
 
   // `is_exported` is true if this symbol is exported from this Mach-O
   // file. `is_imported` is true if this symbol is resolved by the dynamic

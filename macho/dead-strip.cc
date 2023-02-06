@@ -18,8 +18,6 @@ static void collect_root_set(Context<E> &ctx,
   auto keep = [&](Symbol<E> *sym) {
     if (sym->no_dead_strip)
       return true;
-    if (sym->referenced_dynamically)
-      return true;
     if (ctx.output_type == MH_DYLIB || ctx.output_type == MH_BUNDLE)
       if (sym->visibility == SCOPE_GLOBAL)
         return true;
