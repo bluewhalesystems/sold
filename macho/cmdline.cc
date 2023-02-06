@@ -20,6 +20,7 @@ Options:
   -L<PATH>                    Add DIR to library search path
   -ObjC                       Load all static archive members that implement
                               an Objective-C class or category
+  -S                          Do not put debug symbols
   -U <SYMBOL>                 Allow a symbol to be undefined
   -Z                          Do not search the standard directories when
                               searching for libraries and frameworks
@@ -330,6 +331,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       nostdlib = true;
     } else if (read_flag("-ObjC")) {
       ctx.arg.ObjC = true;
+    } else if (read_flag("-S")) {
+      ctx.arg.S = true;
     } else if (read_arg("-U")) {
       ctx.arg.U.push_back(std::string(arg));
     } else if (read_arg("-add_ast_path")) {

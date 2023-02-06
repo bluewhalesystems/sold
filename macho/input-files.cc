@@ -1025,12 +1025,15 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
   // and read debug info from object files.
   //
   // Debug symbols are called "stab" symbols.
-  this->oso_name = get_oso_name();
-  if (!ctx.arg.oso_prefix.empty() && this->oso_name.starts_with(ctx.arg.oso_prefix))
-    this->oso_name = this->oso_name.substr(ctx.arg.oso_prefix.size());
+  if (!ctx.arg.S) {
+    this->oso_name = get_oso_name();
+    if (!ctx.arg.oso_prefix.empty() &&
+        this->oso_name.starts_with(ctx.arg.oso_prefix))
+      this->oso_name = this->oso_name.substr(ctx.arg.oso_prefix.size());
 
-  this->strtab_size += this->oso_name.size() + 1;
-  this->num_stabs = 3;
+    this->strtab_size += this->oso_name.size() + 1;
+    this->num_stabs = 3;
+  }
 
   // Symbols copied from an input symtab to the output symtab
   for (Symbol<E> *sym : this->syms) {
@@ -1049,7 +1052,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
     else
       this->num_locals++;
 
-    if (sym->subsec)
+    if (!ctx.arg.S && sym->subsec)
       this->num_stabs += sym->subsec->isec->hdr.is_text() ? 2 : 1;
 
     this->strtab_size += sym->name.size() + 1;
@@ -1094,41 +1097,43 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   //
   // At the end of stab symbols, we have a N_SO symbol without symbol name
   // as an end marker.
-  MachSym *stab = buf + this->stabs_offset;
-  i64 stab_idx = 2;
+  if (!ctx.arg.S) {
+    MachSym *stab = buf + this->stabs_offset;
+    i64 stab_idx = 2;
 
-  stab[0].stroff = 1; // string "-"
-  stab[0].n_type = N_SO;
-  stab[0].desc = 1;
+    stab[0].stroff = 1; // string "-"
+    stab[0].n_type = N_SO;
+    stab[0].desc = 1;
 
-  stab[1].stroff = stroff;
-  stab[1].n_type = N_OSO;
-  stab[1].desc = 1;
-  stroff += write_string(strtab + stroff, this->oso_name);
+    stab[1].stroff = stroff;
+    stab[1].n_type = N_OSO;
+    stab[1].desc = 1;
+    stroff += write_string(strtab + stroff, this->oso_name);
 
-  for (i64 i = 0; i < this->syms.size(); i++) {
-    Symbol<E> *sym = this->syms[i];
-    if (!sym || sym->file != this || sym->output_symtab_idx == -1 || !sym->subsec)
-      continue;
+    for (i64 i = 0; i < this->syms.size(); i++) {
+      Symbol<E> *sym = this->syms[i];
+      if (!sym || sym->file != this || sym->output_symtab_idx == -1 || !sym->subsec)
+        continue;
 
-    stab[stab_idx].stroff = pos[i];
-    stab[stab_idx].sect = sym->subsec->isec->osec.sect_idx;
-    stab[stab_idx].value = sym->get_addr(ctx);
+      stab[stab_idx].stroff = pos[i];
+      stab[stab_idx].sect = sym->subsec->isec->osec.sect_idx;
+      stab[stab_idx].value = sym->get_addr(ctx);
 
-    if (sym->subsec->isec->hdr.is_text()) {
-      stab[stab_idx].n_type = N_FUN;
-      stab[stab_idx + 1].n_type = N_FUN;
-      stab[stab_idx + 1].sect = sym->subsec->input_size;
-      stab_idx += 2;
-    } else {
-      stab[stab_idx].n_type = (sym->visibility == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
-      stab_idx++;
+      if (sym->subsec->isec->hdr.is_text()) {
+        stab[stab_idx].n_type = N_FUN;
+        stab[stab_idx + 1].n_type = N_FUN;
+        stab[stab_idx + 1].sect = sym->subsec->input_size;
+        stab_idx += 2;
+      } else {
+        stab[stab_idx].n_type = (sym->visibility == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
+        stab_idx++;
+      }
     }
-  }
 
-  assert(stab_idx == this->num_stabs - 1);
-  stab[stab_idx].n_type = N_SO;
-  stab[stab_idx].desc = 1;
+    assert(stab_idx == this->num_stabs - 1);
+    stab[stab_idx].n_type = N_SO;
+    stab[stab_idx].desc = 1;
+  }
 
   // Copy symbols from input symtabs to the output sytmab
   for (i64 i = 0; i < this->syms.size(); i++) {

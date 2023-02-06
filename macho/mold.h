@@ -1016,6 +1016,7 @@ struct Context {
     VersionTriple platform_min_version;
     VersionTriple platform_sdk_version;
     bool ObjC = false;
+    bool S = false;
     bool adhoc_codesign = is_arm<E>;
     bool application_extension = false;
     bool bind_at_load = false;
@@ -1038,6 +1039,7 @@ struct Context {
     bool search_paths_first = true;
     bool stats = false;
     bool trace = false;
+    bool x = false;
     i64 arch = CPU_TYPE_ARM64;
     i64 filler = 0;
     i64 headerpad = 256;
