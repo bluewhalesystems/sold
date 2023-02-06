@@ -11,13 +11,16 @@
 namespace mold::macho {
 
 struct ARM64;
+struct ARM64_32;
 struct X86_64;
 
-template <typename E>
-static constexpr bool is_arm = std::is_same_v<E, ARM64>;
+template <typename E> static constexpr bool is_arm64 = std::is_same_v<E, ARM64>;
+template <typename E> static constexpr bool is_arm64_32 = std::is_same_v<E, ARM64_32>;
+template <typename E> static constexpr bool is_arm = is_arm64<E> || is_arm64_32<E>;
+template <typename E> static constexpr bool is_x86 = std::is_same_v<E, X86_64>;
 
-template <typename E>
-static constexpr bool is_x86 = std::is_same_v<E, X86_64>;
+template <typename E> using Word = std::conditional_t<is_arm64_32<E>, ul32, ul64>;
+template <typename E> using IWord = std::conditional_t<is_arm64_32<E>, il32, il64>;
 
 template <typename E>
 std::string rel_to_string(u8 r_type);
@@ -190,6 +193,7 @@ enum : u32 {
 enum : u32 {
   CPU_TYPE_X86_64 = 0x1000007,
   CPU_TYPE_ARM64 = 0x100000c,
+  CPU_TYPE_ARM64_32 = 0x200000c,
 };
 
 enum : u32 {
@@ -467,6 +471,7 @@ struct LoadCommand {
   ul32 cmdsize;
 };
 
+template <typename E>
 struct SegmentCommand {
   std::string_view get_segname() const {
     return {segname, strnlen(segname, sizeof(segname))};
@@ -475,16 +480,17 @@ struct SegmentCommand {
   ul32 cmd;
   ul32 cmdsize;
   char segname[16];
-  ul64 vmaddr;
-  ul64 vmsize;
-  ul64 fileoff;
-  ul64 filesize;
+  Word<E> vmaddr;
+  Word<E> vmsize;
+  Word<E> fileoff;
+  Word<E> filesize;
   ul32 maxprot;
   ul32 initprot;
   ul32 nsects;
   ul32 flags;
 };
 
+template <typename E>
 struct MachSection {
   void set_segname(std::string_view name) {
     assert(name.size() <= sizeof(segname));
@@ -514,8 +520,8 @@ struct MachSection {
 
   char sectname[16];
   char segname[16];
-  ul64 addr;
-  ul64 size;
+  Word<E> addr;
+  Word<E> size;
   ul32 offset;
   ul32 p2align;
   ul32 reloff;
@@ -661,6 +667,7 @@ struct LinkerOptionCommand {
 };
 
 // This struct is named `n_list` on BSD and macOS.
+template <typename E>
 struct MachSym {
   bool is_undef() const {
     return type == N_UNDF && !is_common();
@@ -692,7 +699,7 @@ struct MachSym {
     };
   };
 
-  ul64 value;
+  Word<E> value;
 };
 
 // This struct is named `relocation_info` on BSD and macOS.
@@ -749,13 +756,13 @@ struct UnwindPageEntry {
 };
 
 // __LD,__compact_unwind section contents
-
+template <typename E>
 struct CompactUnwindEntry {
-  ul64 code_start;
+  Word<E> code_start;
   ul32 code_len;
   ul32 encoding;
-  ul64 personality;
-  ul64 lsda;
+  Word<E> personality;
+  Word<E> lsda;
 };
 
 // __LINKEDIT,__code_signature
@@ -911,6 +918,17 @@ struct ARM64 {
   static constexpr u32 stub_helper_size = 12;
 };
 
+struct ARM64_32 {
+  static constexpr u32 cputype = CPU_TYPE_ARM64_32;
+  static constexpr u32 cpusubtype = CPU_SUBTYPE_ARM64_ALL;
+  static constexpr u32 page_size = 16384;
+  static constexpr u32 abs_rel = ARM64_RELOC_UNSIGNED;
+  static constexpr u32 subtractor_rel = ARM64_RELOC_SUBTRACTOR;
+  static constexpr u32 stub_size = 12;
+  static constexpr u32 stub_helper_hdr_size = 24;
+  static constexpr u32 stub_helper_size = 12;
+};
+
 struct X86_64 {
   static constexpr u32 cputype = CPU_TYPE_X86_64;
   static constexpr u32 cpusubtype = CPU_SUBTYPE_X86_64_ALL;
@@ -921,7 +939,5 @@ struct X86_64 {
   static constexpr u32 stub_helper_hdr_size = 16;
   static constexpr u32 stub_helper_size = 10;
 };
-
-static constexpr size_t word_size = 8;
 
 } // namespace mold::macho

@@ -1,8 +1,10 @@
+#if MOLD_ARM64 || MOLD_ARM64_32
+
 #include "mold.h"
 
 namespace mold::macho {
 
-using E = ARM64;
+using E = MOLD_TARGET;
 
 static u64 page(u64 val) {
   return val & 0xffff'ffff'ffff'f000;
@@ -36,6 +38,14 @@ static void write_add_ldst(u8 *loc, u32 val) {
   *(ul32 *)loc |= bits(val, 11, scale) << 10;
 }
 
+static void to_32(ul32 *loc) {
+  // The most significant two bits of a load/store instruction indicates
+  // the size. Rewrite it to reduce it from 8 to 4 so that it accesses
+  // wN register instead of xN register on the ILP32 ABI.
+  if constexpr (is_arm64_32<E>)
+    *loc = (*loc & 0x3fff'ffff) | 0x8000'0000;
+}
+
 template <>
 void StubsSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
@@ -48,16 +58,16 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
     };
 
     static_assert(sizeof(insn) == E::stub_size);
+    memcpy(buf, insn, sizeof(insn));
+    to_32(buf + 1);
 
     u64 this_addr = this->hdr.addr + E::stub_size * i;
-
     u64 ptr_addr;
     if (syms[i]->has_got())
       ptr_addr = syms[i]->get_got_addr(ctx);
     else
-      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + word_size * j++;
+      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + sizeof(Word<E>) * j++;
 
-    memcpy(buf, insn, sizeof(insn));
     buf[0] |= page_offset(ptr_addr, this_addr);
     buf[1] |= bits(ptr_addr, 11, 3) << 10;
     buf += 3;
@@ -82,6 +92,7 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 
   static_assert(sizeof(insn0) == E::stub_helper_hdr_size);
   memcpy(buf, insn0, sizeof(insn0));
+  to_32(buf + 4);
 
   u64 dyld_private = ctx.__dyld_private->get_addr(ctx);
   buf[0] |= page_offset(dyld_private, this->hdr.addr);
@@ -141,6 +152,9 @@ void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
     u64 ent_addr = this->hdr.addr + ENTRY_SIZE * i;
 
     memcpy(buf, insn, sizeof(insn));
+    to_32(buf + 1);
+    to_32(buf + 3);
+
     buf[0] |= page_offset(sel_addr, ent_addr);
     buf[1] |= bits(sel_addr, 11, 3) << 10;
     buf[2] |= page_offset(msgsend_got_addr, ent_addr + 8);
@@ -150,7 +164,7 @@ void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
 
 template <>
 std::vector<Relocation<E>>
-read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr) {
+read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection<E> &hdr) {
   std::vector<Relocation<E>> vec;
   vec.reserve(hdr.nreloc);
 
@@ -264,12 +278,12 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
     u64 P = get_addr(ctx) + r.offset;
-    u64 G = r.sym() ? r.sym()->got_idx * word_size : 0;
+    u64 G = r.sym() ? r.sym()->got_idx * sizeof(Word<E>) : 0;
     u64 GOT = ctx.got.hdr.addr;
 
     switch (r.type) {
     case ARM64_RELOC_UNSIGNED:
-      ASSERT(r.size == 8);
+      ASSERT(r.size == sizeof(Word<E>));
 
       // Do not write a value if we have a dynamic relocation for this reloc.
       if (r.sym() && r.sym()->is_imported)
@@ -278,9 +292,9 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
       // __thread_vars contains TP-relative addresses to symbols in the
       // TLS initialization image (i.e. __thread_data and __thread_bss).
       if (r.refers_to_tls())
-        *(ul64 *)loc = S + A - ctx.tls_begin;
+        *(Word<E> *)loc = S + A - ctx.tls_begin;
       else
-        *(ul64 *)loc = S + A;
+        *(Word<E> *)loc = S + A;
       break;
     case ARM64_RELOC_SUBTRACTOR:
       // A SUBTRACTOR relocation is always followed by an UNSIGNED relocation.
@@ -329,6 +343,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
   }
 }
 
+template <>
 void RangeExtensionThunk<E>::copy_buf(Context<E> &ctx) {
   u8 *buf = ctx.buf + output_section.hdr.offset + offset;
 
@@ -352,3 +367,5 @@ void RangeExtensionThunk<E>::copy_buf(Context<E> &ctx) {
 }
 
 } // namespace mold::macho
+
+#endif

@@ -3,7 +3,7 @@
 namespace mold::macho {
 
 template <typename E>
-OutputSection<E> &get_output_section(Context<E> &ctx, const MachSection &hdr) {
+OutputSection<E> &get_output_section(Context<E> &ctx, const MachSection<E> &hdr) {
   static std::unordered_set<std::string_view> data_const_set = {
     "__got", "__auth_got", "__auth_ptr", "__nl_symbol_ptr", "__const",
     "__cfstring", "__mod_init_func", "__mod_term_func", "__objc_classlist",
@@ -24,7 +24,7 @@ OutputSection<E> &get_output_section(Context<E> &ctx, const MachSection &hdr) {
 
 template <typename E>
 InputSection<E>::InputSection(Context<E> &ctx, ObjectFile<E> &file,
-                              const MachSection &hdr, u32 secidx)
+                              const MachSection<E> &hdr, u32 secidx)
   : file(file), hdr(hdr), secidx(secidx), osec(get_output_section(ctx, hdr)) {
   if (hdr.type != S_ZEROFILL && &file != ctx.internal_obj)
     contents = file.mf->get_contents().substr(hdr.offset, hdr.size);

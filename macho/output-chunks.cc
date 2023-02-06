@@ -21,8 +21,8 @@ std::ostream &operator<<(std::ostream &out, const Chunk<E> &chunk) {
 
 template <typename E>
 static std::vector<u8> create_pagezero_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(SegmentCommand));
-  SegmentCommand &cmd = *(SegmentCommand *)buf.data();
+  std::vector<u8> buf(sizeof(SegmentCommand<E>));
+  SegmentCommand<E> &cmd = *(SegmentCommand<E> *)buf.data();
 
   cmd.cmd = LC_SEGMENT_64;
   cmd.cmdsize = buf.size();
@@ -69,7 +69,7 @@ static std::vector<u8> create_symtab_cmd(Context<E> &ctx) {
   cmd.cmd = LC_SYMTAB;
   cmd.cmdsize = buf.size();
   cmd.symoff = ctx.symtab.hdr.offset;
-  cmd.nsyms = ctx.symtab.hdr.size / sizeof(MachSym);
+  cmd.nsyms = ctx.symtab.hdr.size / sizeof(MachSym<E>);
   cmd.stroff = ctx.strtab.hdr.offset;
   cmd.strsize = ctx.strtab.hdr.size;
   return buf;
@@ -88,7 +88,7 @@ static std::vector<u8> create_dysymtab_cmd(Context<E> &ctx) {
   cmd.iextdefsym = ctx.symtab.globals_offset;
   cmd.nextdefsym = ctx.symtab.undefs_offset - ctx.symtab.globals_offset;
   cmd.iundefsym = ctx.symtab.undefs_offset;
-  cmd.nundefsym = ctx.symtab.hdr.size / sizeof(MachSym) - ctx.symtab.undefs_offset;
+  cmd.nundefsym = ctx.symtab.hdr.size / sizeof(MachSym<E>) - ctx.symtab.undefs_offset;
   cmd.indirectsymoff = ctx.indir_symtab.hdr.offset;
   cmd.nindirectsyms  = ctx.indir_symtab.hdr.size / ctx.indir_symtab.ENTRY_SIZE;
   return buf;
@@ -305,8 +305,8 @@ static std::vector<std::vector<u8>> create_load_commands(Context<E> &ctx) {
       if (!sec->is_hidden)
         nsects++;
 
-    SegmentCommand cmd = seg->cmd;
-    cmd.cmdsize = sizeof(SegmentCommand) + sizeof(MachSection) * nsects;
+    SegmentCommand<E> cmd = seg->cmd;
+    cmd.cmdsize = sizeof(SegmentCommand<E>) + sizeof(MachSection<E>) * nsects;
     cmd.nsects = nsects;
     append(buf, cmd);
 
@@ -581,7 +581,7 @@ void OutputSegment<E>::set_offset_regular(Context<E> &ctx, i64 fileoff,
       // __thread_vars needs to be aligned to word size because it
       // contains pointers. For some reason, Apple's clang creates it with
       // an alignment of 1. So we need to override.
-      return word_size;
+      return sizeof(Word<E>);
     default:
       return 1 << chunk.hdr.p2align;
     }
@@ -764,7 +764,7 @@ inline void RebaseSection<E>::compute_size(Context<E> &ctx) {
   for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms)
     if (!sym->has_got())
       rebases.emplace_back(ctx.data_seg->seg_idx,
-                           ctx.lazy_symbol_ptr->hdr.addr + i++ * word_size -
+                           ctx.lazy_symbol_ptr->hdr.addr + i++ * sizeof(Word<E>) -
                            ctx.data_seg->cmd.vmaddr);
 
   for (Symbol<E> *sym : ctx.got.syms)
@@ -940,7 +940,7 @@ void LazyBindSection<E>::add(Context<E> &ctx, Symbol<E> &sym, i64 idx) {
   i64 seg_idx = ctx.data_seg->seg_idx;
   emit(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | seg_idx);
 
-  i64 offset = ctx.lazy_symbol_ptr->hdr.addr + idx * word_size -
+  i64 offset = ctx.lazy_symbol_ptr->hdr.addr + idx * sizeof(Word<E>) -
                ctx.data_seg->cmd.vmaddr;
   encode_uleb(contents, offset);
 
@@ -1206,7 +1206,7 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
     vec[i]->strtab_offset = vec[i - 1]->strtab_offset + vec[i - 1]->strtab_size;
 
   i64 num_symbols = last.undefs_offset + last.num_undefs;
-  this->hdr.size = num_symbols * sizeof(MachSym);
+  this->hdr.size = num_symbols * sizeof(MachSym<E>);
   ctx.strtab.hdr.size = last.strtab_offset + last.strtab_size;
 
   // Update symbol's output_symtab_idx
@@ -1231,14 +1231,14 @@ void SymtabSection<E>::compute_size(Context<E> &ctx) {
 template <typename E>
 void SymtabSection<E>::copy_buf(Context<E> &ctx) {
   // Create symbols for -add_ast_path
-  MachSym *buf = (MachSym *)(ctx.buf + this->hdr.offset);
+  MachSym<E> *buf = (MachSym<E> *)(ctx.buf + this->hdr.offset);
   u8 *strtab = ctx.buf + ctx.strtab.hdr.offset;
   i64 stroff = strtab_init_image.size();
 
   memcpy(strtab, strtab_init_image.data(), strtab_init_image.size());
 
   for (std::string_view path : ctx.arg.add_ast_path) {
-    MachSym &msym = *buf++;
+    MachSym<E> &msym = *buf++;
     msym.stroff = stroff;
     msym.n_type = N_AST;
     stroff += write_string(strtab + stroff, path);
@@ -1895,7 +1895,7 @@ void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
       ctx.stub_helper->hdr.size = E::stub_helper_hdr_size;
 
     ctx.stub_helper->hdr.size += E::stub_helper_size;
-    ctx.lazy_symbol_ptr->hdr.size += word_size;
+    ctx.lazy_symbol_ptr->hdr.size += sizeof(Word<E>);
   }
 }
 
@@ -2076,7 +2076,7 @@ void GotSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
 
   sym->got_idx = syms.size();
   syms.push_back(sym);
-  this->hdr.size = (syms.size() + subsections.size()) * word_size;
+  this->hdr.size = (syms.size() + subsections.size()) * sizeof(Word<E>);
 }
 
 template <typename E>
@@ -2106,7 +2106,7 @@ void ThreadPtrsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
   assert(sym->tlv_idx == -1);
   sym->tlv_idx = syms.size();
   syms.push_back(sym);
-  this->hdr.size = syms.size() * word_size;
+  this->hdr.size = syms.size() * sizeof(Word<E>);
 }
 
 template <typename E>

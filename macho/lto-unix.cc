@@ -93,7 +93,7 @@ void do_lto(Context<E> &ctx) {
     for (ObjectFile<E> *file : ctx.objs) {
       if (!file->lto_module) {
         for (i64 i = 0; i < file->mach_syms.size(); i++) {
-          MachSym &msym = file->mach_syms[i];
+          MachSym<E> &msym = file->mach_syms[i];
           Symbol<E> &sym = *file->syms[i];
           if (msym.is_undef() && !sym.file->is_dylib &&
               ((ObjectFile<E> *)sym.file)->lto_module)

@@ -66,7 +66,7 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
   }
 
   if (SymtabCommand *cmd = (SymtabCommand *)find_load_command(ctx, LC_SYMTAB))
-    mach_syms = {(MachSym *)(this->mf->data + cmd->symoff), cmd->nsyms};
+    mach_syms = {(MachSym<E> *)(this->mf->data + cmd->symoff), cmd->nsyms};
 
   parse_sections(ctx);
 
@@ -100,15 +100,16 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
 
 template <typename E>
 void ObjectFile<E>::parse_sections(Context<E> &ctx) {
-  SegmentCommand *cmd = (SegmentCommand *)find_load_command(ctx, LC_SEGMENT_64);
+  SegmentCommand<E> *cmd =
+    (SegmentCommand<E> *)find_load_command(ctx, LC_SEGMENT_64);
   if (!cmd)
     return;
 
-  MachSection *mach_sec = (MachSection *)((u8 *)cmd + sizeof(*cmd));
+  MachSection<E> *mach_sec = (MachSection<E> *)((u8 *)cmd + sizeof(*cmd));
   sections.resize(cmd->nsects);
 
   for (i64 i = 0; i < cmd->nsects; i++) {
-    MachSection &msec = mach_sec[i];
+    MachSection<E> &msec = mach_sec[i];
 
     if (msec.match("__LD", "__compact_unwind")) {
       unwind_sec = &msec;
@@ -150,7 +151,7 @@ static bool always_split(u32 ty) {
 template <typename E>
 void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   struct MachSymOff {
-    MachSym *msym;
+    MachSym<E> *msym;
     i64 symidx;
   };
 
@@ -158,7 +159,7 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
 
   // Find all symbols whose type is N_SECT.
   for (i64 i = 0; i < mach_syms.size(); i++)
-    if (MachSym &msym = mach_syms[i];
+    if (MachSym<E> &msym = mach_syms[i];
         !msym.stab && msym.type == N_SECT && sections[msym.sect - 1])
       msyms.push_back({&msym, i});
 
@@ -245,7 +246,7 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
   sym_to_subsec.resize(mach_syms.size());
 
   for (i64 i = 0; i < mach_syms.size(); i++) {
-    MachSym &msym = mach_syms[i];
+    MachSym<E> &msym = mach_syms[i];
     if (!msym.stab && msym.type == N_SECT)
       sym_to_subsec[i] = subsections[msym.sect - 1];
   }
@@ -336,14 +337,14 @@ void ObjectFile<E>::split_literal_pointers(Context<E> &ctx) {
       continue;
 
     std::string_view str = isec->contents;
-    assert(str.size() % word_size == 0);
+    assert(str.size() % sizeof(Word<E>) == 0);
 
-    for (i64 pos = 0; pos < str.size(); pos += word_size) {
+    for (i64 pos = 0; pos < str.size(); pos += sizeof(Word<E>)) {
       Subsection<E> *subsec = new Subsection<E>{
         .isec = &*isec,
         .input_addr = (u32)(isec->hdr.addr + pos),
-        .input_size = word_size,
-        .p2align = (u8)std::countr_zero(word_size),
+        .input_size = sizeof(Word<E>),
+        .p2align = (u8)std::countr_zero(sizeof(Word<E>)),
         .is_alive = !ctx.arg.dead_strip,
       };
 
@@ -359,13 +360,13 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
   this->syms.reserve(mach_syms.size());
 
   i64 nlocal = 0;
-  for (MachSym &msym : mach_syms)
+  for (MachSym<E> &msym : mach_syms)
     if (!msym.is_extern)
       nlocal++;
   local_syms.reserve(nlocal);
 
   for (i64 i = 0; i < mach_syms.size(); i++) {
-    MachSym &msym = mach_syms[i];
+    MachSym<E> &msym = mach_syms[i];
     std::string_view name = (char *)(this->mf->data + cmd->stroff + msym.stroff);
 
     // Global symbol
@@ -480,15 +481,16 @@ ObjectFile<E>::find_subsection(Context<E> &ctx, u32 addr) {
 // unwinding records. The following function does that.
 template <typename E>
 void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
-  MachSection &hdr = *unwind_sec;
+  MachSection<E> &hdr = *unwind_sec;
 
-  if (hdr.size % sizeof(CompactUnwindEntry))
+  if (hdr.size % sizeof(CompactUnwindEntry<E>))
     Fatal(ctx) << *this << ": invalid __compact_unwind section size";
 
-  i64 num_entries = hdr.size / sizeof(CompactUnwindEntry);
+  i64 num_entries = hdr.size / sizeof(CompactUnwindEntry<E>);
   unwind_records.reserve(num_entries);
 
-  CompactUnwindEntry *src = (CompactUnwindEntry *)(this->mf->data + hdr.offset);
+  CompactUnwindEntry<E> *src =
+    (CompactUnwindEntry<E> *)(this->mf->data + hdr.offset);
 
   // Read compact unwind entries
   for (i64 i = 0; i < num_entries; i++)
@@ -496,7 +498,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
 
   auto find_symbol = [&](u32 addr) -> Symbol<E> * {
     for (i64 i = 0; i < mach_syms.size(); i++)
-      if (MachSym &msym = mach_syms[i]; msym.is_extern && msym.value == addr)
+      if (MachSym<E> &msym = mach_syms[i]; msym.is_extern && msym.value == addr)
         return this->syms[i];
     return nullptr;
   };
@@ -508,7 +510,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
     if (r.offset >= hdr.size)
       Fatal(ctx) << *this << ": relocation offset too large: " << i;
 
-    i64 idx = r.offset / sizeof(CompactUnwindEntry);
+    i64 idx = r.offset / sizeof(CompactUnwindEntry<E>);
     UnwindRecord<E> &dst = unwind_records[idx];
 
     auto error = [&] {
@@ -519,8 +521,8 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
     if (r.p2size != 3 || r.type != E::abs_rel)
       error();
 
-    switch (r.offset % sizeof(CompactUnwindEntry)) {
-    case offsetof(CompactUnwindEntry, code_start): {
+    switch (r.offset % sizeof(CompactUnwindEntry<E>)) {
+    case offsetof(CompactUnwindEntry<E>, code_start): {
       Subsection<E> *target;
       if (r.is_extern)
         target = sym_to_subsec[r.idx];
@@ -534,7 +536,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
       dst.offset = src[idx].code_start - target->input_addr;
       break;
     }
-    case offsetof(CompactUnwindEntry, personality):
+    case offsetof(CompactUnwindEntry<E>, personality):
       if (r.is_extern) {
         dst.personality = this->syms[r.idx];
       } else {
@@ -546,7 +548,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
         Fatal(ctx) << *this << ": __compact_unwind: unsupported "
                    << "personality reference: " << i;
       break;
-    case offsetof(CompactUnwindEntry, lsda): {
+    case offsetof(CompactUnwindEntry<E>, lsda): {
       u32 addr = *(ul32 *)((u8 *)this->mf->data + hdr.offset + r.offset);
 
       Subsection<E> *target;
@@ -603,9 +605,9 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
 // former doesn't need to be base-relocated and thus a bit more efficient.
 template <typename E>
 void ObjectFile<E>::parse_mod_init_func(Context<E> &ctx) {
-  MachSection &hdr = *mod_init_func;
+  MachSection<E> &hdr = *mod_init_func;
 
-  if (hdr.size % word_size)
+  if (hdr.size % sizeof(Word<E>))
     Fatal(ctx) << *this << ": __mod_init_func: unexpected section size";
 
   MachRel *begin = (MachRel *)(this->mf->data + hdr.reloff);
@@ -620,7 +622,7 @@ void ObjectFile<E>::parse_mod_init_func(Context<E> &ctx) {
 
     if (r.type != E::abs_rel)
       Fatal(ctx) << *this << ": __mod_init_func: unexpected relocation type";
-    if (r.offset != i * word_size)
+    if (r.offset != i * sizeof(Word<E>))
       Fatal(ctx) << *this << ": __mod_init_func: unexpected relocation offset";
     if (!r.is_extern)
       Fatal(ctx) << *this << ": __mod_init_func: unexpected is_extern value";
@@ -674,7 +676,7 @@ static u64 get_rank(Symbol<E> &sym) {
 template <typename E>
 void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
   for (i64 i = 0; i < this->syms.size(); i++) {
-    MachSym &msym = mach_syms[i];
+    MachSym<E> &msym = mach_syms[i];
     if (!msym.is_extern || msym.is_undef())
       continue;
 
@@ -738,13 +740,13 @@ ObjectFile<E>::mark_live_objects(Context<E> &ctx,
                                  std::function<void(ObjectFile<E> *)> feeder) {
   assert(this->is_alive);
 
-  auto is_module_local = [&](MachSym &msym) {
+  auto is_module_local = [&](MachSym<E> &msym) {
     return this->is_hidden || msym.is_private_extern ||
            ((msym.desc & N_WEAK_REF) && (msym.desc & N_WEAK_DEF));
   };
 
   for (i64 i = 0; i < this->syms.size(); i++) {
-    MachSym &msym = mach_syms[i];
+    MachSym<E> &msym = mach_syms[i];
     if (!msym.is_extern)
       continue;
 
@@ -774,7 +776,7 @@ template <typename E>
 void ObjectFile<E>::convert_common_symbols(Context<E> &ctx) {
   for (i64 i = 0; i < this->mach_syms.size(); i++) {
     Symbol<E> &sym = *this->syms[i];
-    MachSym &msym = mach_syms[i];
+    MachSym<E> &msym = mach_syms[i];
 
     if (sym.file == this && sym.is_common) {
       InputSection<E> *isec = get_common_sec(ctx);
@@ -801,7 +803,7 @@ template <typename E>
 void ObjectFile<E>::check_duplicate_symbols(Context<E> &ctx) {
   for (i64 i = 0; i < this->mach_syms.size(); i++) {
     Symbol<E> *sym = this->syms[i];
-    MachSym &msym = mach_syms[i];
+    MachSym<E> &msym = mach_syms[i];
     if (sym && sym->file && sym->file != this && !msym.is_undef() &&
         !msym.is_common() && !(msym.desc & N_WEAK_DEF))
       Error(ctx) << "duplicate symbol: " << *this << ": " << *sym->file
@@ -812,7 +814,7 @@ void ObjectFile<E>::check_duplicate_symbols(Context<E> &ctx) {
 template <typename E>
 InputSection<E> *ObjectFile<E>::get_common_sec(Context<E> &ctx) {
   if (!common_sec) {
-    MachSection *hdr = new MachSection;
+    MachSection<E> *hdr = new MachSection<E>;
     common_hdr.reset(hdr);
 
     memset(hdr, 0, sizeof(*hdr));
@@ -837,7 +839,7 @@ void ObjectFile<E>::parse_lto_symbols(Context<E> &ctx) {
     this->syms.push_back(get_symbol(ctx, name));
 
     u32 attr = ctx.lto.module_get_symbol_attribute(this->lto_module, i);
-    MachSym msym = {};
+    MachSym<E> msym = {};
 
     switch (attr & LTO_SYMBOL_DEFINITION_MASK) {
     case LTO_SYMBOL_DEFINITION_REGULAR:
@@ -919,12 +921,12 @@ ObjectFile<E>::add_methname_string(Context<E> &ctx, std::string_view contents) {
 
   u64 addr = 0;
   if (!sections.empty()) {
-    const MachSection &hdr = sections.back()->hdr;
+    const MachSection<E> &hdr = sections.back()->hdr;
     addr = hdr.addr + hdr.size;
   }
 
   // Create a dummy Mach-O section
-  MachSection *msec = new MachSection;
+  MachSection<E> *msec = new MachSection<E>;
   mach_sec_pool.emplace_back(msec);
 
   memset(msec, 0, sizeof(*msec));
@@ -958,14 +960,14 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
   assert(this == ctx.internal_obj);
 
   // Create a dummy Mach-O section
-  MachSection *msec = new MachSection;
+  MachSection<E> *msec = new MachSection<E>;
   mach_sec_pool.emplace_back(msec);
 
   memset(msec, 0, sizeof(*msec));
   msec->set_segname("__DATA");
   msec->set_sectname("__objc_selrefs");
   msec->addr = sections.back()->hdr.addr + sections.back()->hdr.size,
-  msec->size = word_size;
+  msec->size = sizeof(Word<E>);
   msec->type = S_LITERAL_POINTERS;
   msec->attr = S_ATTR_NO_DEAD_STRIP;
 
@@ -979,7 +981,7 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
     .target = &methname,
     .offset = 0,
     .type = E::abs_rel,
-    .size = (u8)word_size,
+    .size = (u8)sizeof(Word<E>),
     .is_sym = false,
   });
 
@@ -987,10 +989,10 @@ ObjectFile<E>::add_selrefs(Context<E> &ctx, Subsection<E> &methname) {
   Subsection<E> *subsec = new Subsection<E>{
     .isec = isec,
     .input_addr = (u32)msec->addr,
-    .input_size = word_size,
+    .input_size = sizeof(Word<E>),
     .rel_offset = 0,
     .nrels = 1,
-    .p2align = (u8)std::countr_zero(word_size),
+    .p2align = (u8)std::countr_zero(sizeof(Word<E>)),
     .is_alive = !ctx.arg.dead_strip,
   };
 
@@ -1065,7 +1067,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
 
 template <typename E>
 void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
-  MachSym *buf = (MachSym *)(ctx.buf + ctx.symtab.hdr.offset);
+  MachSym<E> *buf = (MachSym<E> *)(ctx.buf + ctx.symtab.hdr.offset);
   u8 *strtab = ctx.buf + ctx.strtab.hdr.offset;
   i64 stroff = this->strtab_offset;
 
@@ -1101,7 +1103,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   // At the end of stab symbols, we have a N_SO symbol without symbol name
   // as an end marker.
   if (!ctx.arg.S) {
-    MachSym *stab = buf + this->stabs_offset;
+    MachSym<E> *stab = buf + this->stabs_offset;
     i64 stab_idx = 2;
 
     stab[0].stroff = 1; // string "-"
@@ -1147,7 +1149,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
     if (ctx.arg.x && sym->visibility == SCOPE_LOCAL)
       continue;
 
-    MachSym &msym = buf[sym->output_symtab_idx];
+    MachSym<E> &msym = buf[sym->output_symtab_idx];
     msym.stroff = pos[i];
     msym.is_extern = (sym->visibility == SCOPE_GLOBAL);
 
@@ -1449,7 +1451,7 @@ void DylibFile<E>::compute_symtab_size(Context<E> &ctx) {
 
 template <typename E>
 void DylibFile<E>::populate_symtab(Context<E> &ctx) {
-  MachSym *buf = (MachSym *)(ctx.buf + ctx.symtab.hdr.offset);
+  MachSym<E> *buf = (MachSym<E> *)(ctx.buf + ctx.symtab.hdr.offset);
   u8 *strtab = ctx.buf + ctx.strtab.hdr.offset;
   i64 stroff = this->strtab_offset;
 
@@ -1459,7 +1461,7 @@ void DylibFile<E>::populate_symtab(Context<E> &ctx) {
     if (!sym || sym->file != this || sym->output_symtab_idx == -1)
       continue;
 
-    MachSym &msym = buf[sym->output_symtab_idx];
+    MachSym<E> &msym = buf[sym->output_symtab_idx];
     msym.stroff = stroff;
     msym.is_extern = true;
     msym.type = N_UNDF;

@@ -1,3 +1,5 @@
+#if MOLD_ARM64 || MOLD_ARM64_32
+
 #include "mold.h"
 
 #include <tbb/parallel_for.h>
@@ -5,7 +7,7 @@
 
 namespace mold::macho {
 
-using E = ARM64;
+using E = MOLD_TARGET;
 
 // We create a thunk no further than 100 MiB from any section.
 static constexpr i64 MAX_DISTANCE = 100 * 1024 * 1024;
@@ -51,6 +53,7 @@ static void reset_thunk(RangeExtensionThunk<E> &thunk) {
 // that, we need to let it branch to a linker-synthesized code
 // sequence that construct a full 32 bit address in a register and
 // jump there. That linker-synthesized code is called "thunk".
+template <>
 void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
   std::span<Subsection<E> *> m = osec.members;
   if (m.empty())
@@ -177,3 +180,5 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
 }
 
 } // namespace mold::macho
+
+#endif

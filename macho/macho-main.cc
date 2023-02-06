@@ -252,7 +252,7 @@ static void remove_unreferenced_subsections(Context<E> &ctx) {
       return;
 
     for (i64 i = 0; i < file->mach_syms.size(); i++) {
-      MachSym &msym = file->mach_syms[i];
+      MachSym<E> &msym = file->mach_syms[i];
       Symbol<E> &sym = *file->syms[i];
       if (sym.file != file && (msym.type == N_SECT) &&
           (msym.desc & N_WEAK_DEF) && !(msym.desc & N_ALT_ENTRY))
@@ -584,7 +584,7 @@ static void uniquify_literal_pointers(Context<E> &ctx, OutputSection<E> &osec) {
   std::unordered_map<Subsection<E> *, Subsection<E> *> map;
 
   for (Subsection<E> *subsec : osec.members) {
-    assert(subsec->input_size == word_size);
+    assert(subsec->input_size == sizeof(Word<E>));
     std::span<Relocation<E>> rels = subsec->get_rels();
 
     if (rels.size() == 1) {
@@ -747,14 +747,14 @@ static void fix_synthetic_symbol_values(Context<E> &ctx) {
   ctx.__mh_bundle_header->value = ctx.data->hdr.addr;
   ctx.___dso_handle->value = ctx.data->hdr.addr;
 
-  auto find_segment = [&](std::string_view name) -> SegmentCommand * {
+  auto find_segment = [&](std::string_view name) -> SegmentCommand<E> * {
     for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
       if (seg->cmd.get_segname() == name)
         return &seg->cmd;
     return nullptr;
   };
 
-  auto find_section = [&](std::string_view name) -> MachSection * {
+  auto find_section = [&](std::string_view name) -> MachSection<E> * {
     size_t pos = name.find('$');
     if (pos == name.npos)
       return nullptr;
@@ -776,28 +776,28 @@ static void fix_synthetic_symbol_values(Context<E> &ctx) {
 
     if (remove_prefix(name, "segment$start$")) {
       sym->value = ctx.text->hdr.addr;
-      if (SegmentCommand *cmd = find_segment(name))
+      if (SegmentCommand<E> *cmd = find_segment(name))
         sym->value = cmd->vmaddr;
       continue;
     }
 
     if (remove_prefix(name, "segment$end$")) {
       sym->value = ctx.text->hdr.addr;
-      if (SegmentCommand *cmd = find_segment(name))
+      if (SegmentCommand<E> *cmd = find_segment(name))
         sym->value = cmd->vmaddr + cmd->vmsize;
       continue;
     }
 
     if (remove_prefix(name, "section$start$")) {
       sym->value = ctx.text->hdr.addr;
-      if (MachSection *hdr = find_section(name))
+      if (MachSection<E> *hdr = find_section(name))
         sym->value = hdr->addr;
       continue;
     }
 
     if (remove_prefix(name, "section$end$")) {
       sym->value = ctx.text->hdr.addr;
-      if (MachSection *hdr = find_section(name))
+      if (MachSection<E> *hdr = find_section(name))
         sym->value = hdr->addr + hdr->size;
       continue;
     }
@@ -1194,9 +1194,11 @@ int macho_main(int argc, char **argv) {
 
   if (ctx.arg.arch != E::cputype) {
     switch (ctx.arg.arch) {
-    case CPU_TYPE_X86_64:
-      return macho_main<X86_64>(argc, argv);
     case CPU_TYPE_ARM64:
+      return macho_main<X86_64>(argc, argv);
+    case CPU_TYPE_ARM64_32:
+      return macho_main<ARM64_32>(argc, argv);
+    case CPU_TYPE_X86_64:
       return macho_main<X86_64>(argc, argv);
     }
     Fatal(ctx) << "unknown cputype: " << ctx.arg.arch;
@@ -1315,6 +1317,7 @@ using E = MOLD_TARGET;
 
 #ifdef MOLD_ARM64
 
+extern template int macho_main<ARM64_32>(int, char **);
 extern template int macho_main<X86_64>(int, char **);
 
 int main(int argc, char **argv) {

@@ -33,7 +33,7 @@ static void collect_root_set(Context<E> &ctx,
       add(sym);
 
     for (Subsection<E> *subsec : file->subsections)
-      if (const MachSection &hdr = subsec->isec->hdr;
+      if (const MachSection<E> &hdr = subsec->isec->hdr;
           (hdr.attr & S_ATTR_NO_DEAD_STRIP) ||
           hdr.type == S_MOD_INIT_FUNC_POINTERS ||
           hdr.type == S_MOD_TERM_FUNC_POINTERS)

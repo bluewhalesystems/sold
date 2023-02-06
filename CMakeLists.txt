@@ -311,9 +311,10 @@ list(APPEND MOLD_ELF_TEMPLATE_FILES
   elf/tls.cc
   )
 
-list(APPEND MOLD_MACHO_TARGETS X86_64 ARM64)
+list(APPEND MOLD_MACHO_TARGETS X86_64 ARM64 ARM64_32)
 
 list(APPEND MOLD_MACHO_TEMPLATE_FILES
+  macho/arch-arm64.cc
   macho/cmdline.cc
   macho/dead-strip.cc
   macho/input-files.cc
@@ -323,6 +324,7 @@ list(APPEND MOLD_MACHO_TEMPLATE_FILES
   macho/mapfile.cc
   macho/output-chunks.cc
   macho/tapi.cc
+  macho/thunks.cc
   )
 
 function(mold_instantiate_templates SOURCE TARGET)
@@ -380,9 +382,7 @@ target_sources(mold PRIVATE
 
 if(MOLD_IS_SOLD)
   target_sources(mold PRIVATE
-    macho/arch-arm64.cc
     macho/arch-x86-64.cc
-    macho/thunks.cc
     macho/yaml.cc
     )
 endif()

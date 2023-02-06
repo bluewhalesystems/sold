@@ -158,23 +158,23 @@ public:
   void check_duplicate_symbols(Context<E> &ctx);
   std::string_view get_linker_optimization_hints(Context<E> &ctx);
 
-  Relocation<E> read_reloc(Context<E> &ctx, const MachSection &hdr, MachRel r);
+  Relocation<E> read_reloc(Context<E> &ctx, const MachSection<E> &hdr, MachRel r);
 
   std::vector<std::unique_ptr<InputSection<E>>> sections;
   std::vector<Subsection<E> *> subsections;
   std::vector<Subsection<E> *> sym_to_subsec;
-  std::span<MachSym> mach_syms;
+  std::span<MachSym<E>> mach_syms;
   std::vector<Symbol<E>> local_syms;
   std::vector<UnwindRecord<E>> unwind_records;
   ObjcImageInfo *objc_image_info = nullptr;
   LTOModule *lto_module = nullptr;
 
   // For __init_offsets
-  MachSection *mod_init_func = nullptr;
+  MachSection<E> *mod_init_func = nullptr;
   std::vector<Symbol<E> *> init_functions;
 
   // For the internal file and LTO object files
-  std::vector<MachSym> mach_syms2;
+  std::vector<MachSym<E>> mach_syms2;
 
   // For the internal file
   void add_msgsend_symbol(Context<E> &ctx, Symbol<E> &sym);
@@ -194,12 +194,12 @@ private:
   Subsection<E> *add_methname_string(Context<E> &ctx, std::string_view contents);
   Subsection<E> *add_selrefs(Context<E> &ctx, Subsection<E> &methname);
 
-  MachSection *unwind_sec = nullptr;
-  std::unique_ptr<MachSection> common_hdr;
+  MachSection<E> *unwind_sec = nullptr;
+  std::unique_ptr<MachSection<E>> common_hdr;
   InputSection<E> *common_sec = nullptr;
 
   std::vector<std::unique_ptr<Subsection<E>>> subsec_pool;
-  std::vector<std::unique_ptr<MachSection>> mach_sec_pool;
+  std::vector<std::unique_ptr<MachSection<E>>> mach_sec_pool;
 };
 
 template <typename E>
@@ -244,12 +244,12 @@ std::ostream &operator<<(std::ostream &out, const InputFile<E> &file);
 template <typename E>
 class InputSection {
 public:
-  InputSection(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr,
+  InputSection(Context<E> &ctx, ObjectFile<E> &file, const MachSection<E> &hdr,
                u32 secidx);
   void parse_relocations(Context<E> &ctx);
 
   ObjectFile<E> &file;
-  const MachSection &hdr;
+  const MachSection<E> &hdr;
   u32 secidx = 0;
   OutputSection<E> &osec;
   std::string_view contents;
@@ -306,7 +306,7 @@ public:
 
 template <typename E>
 std::vector<Relocation<E>>
-read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection &hdr);
+read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection<E> &hdr);
 
 //
 // Symbol
@@ -405,7 +405,7 @@ public:
 
   void set_offset(Context<E> &ctx, i64 fileoff, u64 vmaddr);
 
-  SegmentCommand cmd = {};
+  SegmentCommand<E> cmd = {};
   i32 seg_idx = -1;
   std::vector<Chunk<E> *> chunks;
 
@@ -432,7 +432,7 @@ public:
 
   OutputSection<E> *to_osec() const;
 
-  MachSection hdr = {};
+  MachSection<E> hdr = {};
   u32 sect_idx = 0;
   bool is_hidden = false;
   OutputSegment<E> *seg = nullptr;
@@ -459,24 +459,30 @@ public:
 template <typename E>
 class RangeExtensionThunk {};
 
-template <>
-class RangeExtensionThunk<ARM64> {
+template <typename E> requires is_arm<E>
+class RangeExtensionThunk<E> {
 public:
-  RangeExtensionThunk(OutputSection<ARM64> &osec, i64 thunk_idx, i64 offset)
+  RangeExtensionThunk(OutputSection<E> &osec, i64 thunk_idx, i64 offset)
     : output_section(osec), thunk_idx(thunk_idx), offset(offset) {}
 
-  i64 size() const { return symbols.size() * ENTRY_SIZE; }
-  u64 get_addr(i64 idx) const;
-  void copy_buf(Context<ARM64> &ctx);
+  i64 size() const {
+    return symbols.size() * ENTRY_SIZE;
+  }
+
+  u64 get_addr(i64 idx) const {
+    return output_section.hdr.addr + offset + idx * ENTRY_SIZE;
+  }
+
+  void copy_buf(Context<E> &ctx);
 
   static constexpr i64 ALIGNMENT = 16;
   static constexpr i64 ENTRY_SIZE = 12;
 
-  OutputSection<ARM64> &output_section;
+  OutputSection<E> &output_section;
   i64 thunk_idx;
   i64 offset;
   std::mutex mu;
-  std::vector<Symbol<ARM64> *> symbols;
+  std::vector<Symbol<E> *> symbols;
 };
 
 template <typename E>
@@ -946,7 +952,8 @@ void do_lto(Context<E> &ctx);
 // arch-arm64.cc
 //
 
-void create_range_extension_thunks(Context<ARM64> &ctx, OutputSection<ARM64> &osec);
+template <typename E> requires is_arm<E>
+void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec);
 
 //
 // main.cc
@@ -1187,13 +1194,13 @@ u64 Symbol<E>::get_addr(Context<E> &ctx) const {
 template <typename E>
 u64 Symbol<E>::get_got_addr(Context<E> &ctx) const {
   assert(got_idx != -1);
-  return ctx.got.hdr.addr + got_idx * word_size;
+  return ctx.got.hdr.addr + got_idx * sizeof(Word<E>);
 }
 
 template <typename E>
 u64 Symbol<E>::get_tlv_addr(Context<E> &ctx) const {
   assert(tlv_idx != -1);
-  return ctx.thread_ptrs.hdr.addr + tlv_idx * word_size;
+  return ctx.thread_ptrs.hdr.addr + tlv_idx * sizeof(Word<E>);
 }
 
 template <typename E>
@@ -1210,10 +1217,6 @@ inline std::ostream &operator<<(std::ostream &out, const Symbol<E> &sym) {
   else
     out << sym.name;
   return out;
-}
-
-inline u64 RangeExtensionThunk<ARM64>::get_addr(i64 idx) const {
-  return output_section.hdr.addr + offset + idx * ENTRY_SIZE;
 }
 
 template <typename E>

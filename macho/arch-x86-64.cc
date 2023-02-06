@@ -23,7 +23,7 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
     if (syms[i]->has_got())
       ptr_addr = syms[i]->get_got_addr(ctx);
     else
-      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + word_size * j++;
+      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + sizeof(Word<E>) * j++;
 
     *(ul32 *)(buf + 2) = ptr_addr - this_addr - 6;
     buf += sizeof(insn);
@@ -117,8 +117,7 @@ static i64 read_addend(u8 *buf, const MachRel &r) {
 
 template <>
 std::vector<Relocation<E>>
-read_relocations(Context<E> &ctx, ObjectFile<E> &file,
-                 const MachSection &hdr) {
+read_relocations(Context<E> &ctx, ObjectFile<E> &file, const MachSection<E> &hdr) {
   std::vector<Relocation<E>> vec;
   vec.reserve(hdr.nreloc);
 
@@ -203,7 +202,7 @@ void Subsection<E>::apply_reloc(Context<E> &ctx, u8 *buf) {
     u64 S = r.get_addr(ctx);
     u64 A = r.addend;
     u64 P = get_addr(ctx) + r.offset;
-    u64 G = r.sym() ? r.sym()->got_idx * word_size : 0;
+    u64 G = r.sym() ? r.sym()->got_idx * sizeof(Word<E>) : 0;
     u64 GOT = ctx.got.hdr.addr;
 
     switch (r.type) {
