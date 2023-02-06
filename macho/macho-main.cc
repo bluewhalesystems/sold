@@ -123,7 +123,7 @@ static void compute_import_export(Context<E> &ctx) {
   // Compute is_imported and is_exported values
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (Symbol<E> *sym : file->syms) {
-      if (sym->visibility != SCOPE_GLOBAL)
+      if (!sym || sym->visibility != SCOPE_GLOBAL)
         continue;
 
       // If we are creating a dylib, all global symbols are exported by default.
@@ -146,12 +146,30 @@ static void compute_import_export(Context<E> &ctx) {
   // We want to export symbols referenced by dylibs.
   tbb::parallel_for_each(ctx.dylibs, [&](DylibFile<E> *file) {
     for (Symbol<E> *sym : file->syms) {
-      if (sym->file && !sym->file->is_dylib && sym->visibility == SCOPE_GLOBAL) {
+      if (sym && sym->file && !sym->file->is_dylib &&
+          sym->visibility == SCOPE_GLOBAL) {
         std::scoped_lock lock(sym->mu);
         sym->is_exported = true;
       }
     }
   });
+
+  // Some symbols are referenced only by linker-synthesized sections.
+  // We need to handle such symbols too.
+  auto import = [&](Symbol<E> &sym) {
+    if (!sym.file)
+      Error(ctx) << "undefined symbol: " << sym;
+
+    if (sym.file->is_dylib) {
+      sym.is_imported = true;
+      sym.flags |= NEEDS_GOT;
+    }
+  };
+
+  if (ctx.objc_stubs)
+    import(*ctx._objc_msgSend);
+  if (ctx.stub_helper)
+    import(*ctx.dyld_stub_binder);
 }
 
 template <typename E>
@@ -379,14 +397,6 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
 
   if (!syms.empty()) {
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
-
-    if (!ctx._objc_msgSend->file)
-      Error(ctx) << "undefined symbol: _objc_msgSend";
-
-    if (ctx._objc_msgSend->file->is_dylib) {
-      ctx._objc_msgSend->is_imported = true;
-      ctx._objc_msgSend->flags |= NEEDS_GOT;
-    }
 
     tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
       return a->name < b->name;
@@ -642,17 +652,14 @@ static void scan_unwind_info(Context<E> &ctx) {
 }
 
 template <typename E>
-static void export_symbols(Context<E> &ctx) {
-  Timer t(ctx, "export_symbols");
+static void scan_relocations(Context<E> &ctx) {
+  Timer t(ctx, "scan_relocations");
 
-  if (ctx.stub_helper) {
-    Symbol<E> &sym = *ctx.dyld_stub_binder;
-    if (!sym.file)
-      Error(ctx) << "unresolved symbol: dyld_stub_binder";
-    if (sym.file->is_dylib)
-      sym.is_imported = true;
-    ctx.got.add(ctx, &sym);
-  }
+  for (ObjectFile<E> *file : ctx.objs)
+    for (Subsection<E> *subsec : file->subsections)
+      subsec->scan_relocations(ctx);
+
+  scan_unwind_info(ctx);
 
   std::vector<InputFile<E> *> files;
   append(files, ctx.objs);
@@ -1211,9 +1218,6 @@ int macho_main(int argc, char **argv) {
   // Handle -unexported_symbol and -unexported_symbols_list
   handle_unexported_symbols_list(ctx);
 
-  // Set values to is_imported and is_exported
-  compute_import_export(ctx);
-
   if (ctx.arg.trace) {
     for (ObjectFile<E> *file : ctx.objs)
       SyncOut(ctx) << *file;
@@ -1245,12 +1249,9 @@ int macho_main(int argc, char **argv) {
   for (i64 i = 0; i < ctx.segments.size(); i++)
     ctx.segments[i]->seg_idx = (has_pagezero_seg ? i + 1 : i);
 
-  for (ObjectFile<E> *file : ctx.objs)
-    for (Subsection<E> *subsec : file->subsections)
-      subsec->scan_relocations(ctx);
+  compute_import_export(ctx);
 
-  scan_unwind_info(ctx);
-  export_symbols(ctx);
+  scan_relocations(ctx);
 
   i64 output_size = assign_offsets(ctx);
   ctx.tls_begin = get_tls_begin(ctx);
