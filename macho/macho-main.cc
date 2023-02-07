@@ -445,6 +445,10 @@ static void create_synthetic_chunks(Context<E> &ctx) {
   if (ctx.arg.function_starts)
     ctx.function_starts.reset(new FunctionStartsSection(ctx));
 
+  // Create a __LINKEDIT,__data_in_code section.
+  if (ctx.arg.data_in_code_info)
+    ctx.data_in_code.reset(new DataInCodeSection(ctx));
+
   // Create a __TEXT,__init_offsets section.
   if (ctx.arg.init_offsets)
     ctx.init_offsets.reset(new InitOffsetsSection(ctx));

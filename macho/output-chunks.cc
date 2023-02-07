@@ -216,8 +216,8 @@ static std::vector<u8> create_data_in_code_cmd(Context<E> &ctx) {
 
   cmd.cmd = LC_DATA_IN_CODE;
   cmd.cmdsize = buf.size();
-  cmd.dataoff = ctx.data_in_code.hdr.offset;
-  cmd.datasize = ctx.data_in_code.hdr.size;
+  cmd.dataoff = ctx.data_in_code->hdr.offset;
+  cmd.datasize = ctx.data_in_code->hdr.size;
   return buf;
 }
 
@@ -345,7 +345,7 @@ static std::vector<std::vector<u8>> create_load_commands(Context<E> &ctx) {
   for (std::string_view rpath : ctx.arg.rpaths)
     vec.push_back(create_rpath_cmd(ctx, rpath));
 
-  if (!ctx.data_in_code.contents.empty())
+  if (ctx.data_in_code)
     vec.push_back(create_data_in_code_cmd(ctx));
 
   if (!ctx.arg.umbrella.empty())

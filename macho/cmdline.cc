@@ -40,6 +40,8 @@ Options:
   -compatibility_version <VERSION>
                               Specifies the compatibility version number of the library
   -current_version <VERSION>  Specifies the current version number of the library.
+  -data_in_code_info          Emit data-in-code information
+    -no_data_in_code_info
   -dead_strip                 Remove unreachable functions and data
   -dead_strip_dylibs          Remove unreachable dylibs from dependencies
   -debug_variant              Ignored
@@ -374,6 +376,10 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_flag("-color-diagnostics") ||
                read_flag("--color-diagnostics")) {
       ctx.arg.color_diagnostics = true;
+    } else if (read_flag("-data_in_code_info")) {
+      ctx.arg.data_in_code_info = true;
+    } else if (read_flag("-no_data_in_code_info")) {
+      ctx.arg.data_in_code_info = false;
     } else if (read_flag("-dead_strip")) {
       ctx.arg.dead_strip = true;
     } else if (read_flag("-dead_strip_dylibs")) {

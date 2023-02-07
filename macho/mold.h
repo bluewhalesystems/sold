@@ -1050,6 +1050,7 @@ struct Context {
     bool application_extension = false;
     bool bind_at_load = false;
     bool color_diagnostics = false;
+    bool data_in_code_info = true;
     bool dead_strip = false;
     bool dead_strip_dylibs = false;
     bool deduplicate = true;
@@ -1152,7 +1153,6 @@ struct Context {
   StubsSection<E> stubs{*this};
   UnwindInfoSection<E> unwind_info{*this};
   GotSection<E> got{*this};
-  DataInCodeSection<E> data_in_code{*this};
   ThreadPtrsSection<E> thread_ptrs{*this};
   ExportSection<E> export_{*this};
   SymtabSection<E> symtab{*this};
@@ -1170,6 +1170,7 @@ struct Context {
   std::unique_ptr<ObjcImageInfoSection<E>> image_info;
   std::unique_ptr<CodeSignatureSection<E>> code_sig;
   std::unique_ptr<ObjcStubsSection<E>> objc_stubs;
+  std::unique_ptr<DataInCodeSection<E>> data_in_code;
   std::unique_ptr<InitOffsetsSection<E>> init_offsets;
 
   OutputSection<E> *text = nullptr;
