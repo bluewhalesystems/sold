@@ -9,10 +9,10 @@ namespace mold::macho {
 
 using E = MOLD_TARGET;
 
-// We create a thunk no further than 100 MiB from any section.
+// We create a thunk no further than 100 MiB from any subsection.
 static constexpr i64 MAX_DISTANCE = 100 * 1024 * 1024;
 
-// We create a thunk for each 10 MiB input sections.
+// We create a thunk for each 10 MiB subsections.
 static constexpr i64 BATCH_SIZE = 10 * 1024 * 1024;
 
 // We assume that a single thunk group is smaller than 100 KiB.
@@ -20,17 +20,21 @@ static constexpr i64 MAX_THUNK_SIZE = 102400;
 
 static bool is_reachable(Context<E> &ctx, Symbol<E> &sym,
                          Subsection<E> &subsec, Relocation<E> &rel) {
-  // We pessimistically assume that PLT entries are unreacahble.
-  if (sym.stub_idx != -1)
-    return false;
+  if (sym.has_stub()) {
+    // If it branches to PLT, the PLT must have already got an address.
+    if (ctx.stubs.hdr.addr == 0)
+      return false;
+  } else {
+    // We create thunks with a pessimistic assumption that all
+    // out-of-section relocations would be out-of-range.
+    if (!sym.subsec || &sym.subsec->isec->osec != &subsec.isec->osec)
+      return false;
 
-  // We create thunks with a pessimistic assumption that all
-  // out-of-section relocations would be out-of-range.
-  if (!sym.subsec || &sym.subsec->isec->osec != &subsec.isec->osec)
-    return false;
-
-  if (sym.subsec->output_offset == -1)
-    return false;
+    // Uninitialized subsections in the same output section are
+    // out-of-reach.
+    if (sym.subsec->output_offset == -1)
+      return false;
+  }
 
   // Compute a distance between the relocated place and the symbol
   // and check if they are within reach.

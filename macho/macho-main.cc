@@ -303,8 +303,8 @@ static bool compare_chunks(const Chunk<E> *a, const Chunk<E> *b) {
   static const std::string_view rank[] = {
     // __TEXT
     "__mach_header",
-    "__text",
     "__stubs",
+    "__text",
     "__stub_helper",
     "__gcc_except_tab",
     "__cstring",
