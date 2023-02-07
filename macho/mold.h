@@ -448,7 +448,11 @@ public:
   virtual void compute_size(Context<E> &ctx) {}
   virtual void copy_buf(Context<E> &ctx) {}
 
-  OutputSection<E> *to_osec() const;
+  OutputSection<E> *to_osec() const  {
+    if (is_output_section)
+      return (OutputSection<E> *)this;
+    return nullptr;
+  }
 
   MachSection<E> hdr = {};
   u32 sect_idx = 0;
@@ -1199,13 +1203,6 @@ std::ostream &operator<<(std::ostream &out, const InputSection<E> &sec) {
 }
 
 template <typename E>
-inline Symbol<E> *get_symbol(Context<E> &ctx, std::string_view name) {
-  typename decltype(ctx.symbol_map)::const_accessor acc;
-  ctx.symbol_map.insert(acc, {name, Symbol<E>(name)});
-  return (Symbol<E> *)(&acc->second);
-}
-
-template <typename E>
 inline std::ostream &operator<<(std::ostream &out, const Symbol<E> &sym) {
   if (opt_demangle && sym.name.starts_with("__Z"))
     out << demangle(sym.name.substr(1));
@@ -1215,10 +1212,10 @@ inline std::ostream &operator<<(std::ostream &out, const Symbol<E> &sym) {
 }
 
 template <typename E>
-OutputSection<E> *Chunk<E>::to_osec() const {
-  if (is_output_section)
-    return (OutputSection<E> *)this;
-  return nullptr;
+inline Symbol<E> *get_symbol(Context<E> &ctx, std::string_view name) {
+  typename decltype(ctx.symbol_map)::const_accessor acc;
+  ctx.symbol_map.insert(acc, {name, Symbol<E>(name)});
+  return (Symbol<E> *)(&acc->second);
 }
 
 } // namespace mold::macho
