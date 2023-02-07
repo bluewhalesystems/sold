@@ -1184,6 +1184,17 @@ static void print_stats(Context<E> &ctx) {
 }
 
 template <typename E>
+static int redo_main(int argc, char **argv, i64 arch) {
+  switch (arch) {
+  case CPU_TYPE_ARM64_32:
+    return macho_main<ARM64_32>(argc, argv);
+  case CPU_TYPE_X86_64:
+    return macho_main<X86_64>(argc, argv);
+  }
+  unreachable();
+}
+
+template <typename E>
 int macho_main(int argc, char **argv) {
   Context<E> ctx;
 
@@ -1192,17 +1203,9 @@ int macho_main(int argc, char **argv) {
 
   std::vector<std::string> file_args = parse_nonpositional_args(ctx);
 
-  if (ctx.arg.arch != E::cputype) {
-    switch (ctx.arg.arch) {
-    case CPU_TYPE_ARM64:
-      return macho_main<X86_64>(argc, argv);
-    case CPU_TYPE_ARM64_32:
-      return macho_main<ARM64_32>(argc, argv);
-    case CPU_TYPE_X86_64:
-      return macho_main<X86_64>(argc, argv);
-    }
-    Fatal(ctx) << "unknown cputype: " << ctx.arg.arch;
-  }
+  if constexpr (is_arm64<E>)
+    if (ctx.arg.arch != E::cputype)
+      return redo_main<E>(argc, argv, ctx.arg.arch);
 
   Timer t(ctx, "all");
 
