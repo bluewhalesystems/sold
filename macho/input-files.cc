@@ -384,11 +384,11 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
     sym.visibility = SCOPE_LOCAL;
     sym.is_common = false;
     sym.is_weak = false;
-    sym.is_tlv = false;
     sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
 
     if (msym.type == N_ABS) {
       sym.value = msym.value;
+      sym.is_tlv = false;
     } else if (!msym.stab && msym.type == N_SECT) {
       sym.subsec = sym_to_subsec[i];
       if (!sym.subsec)
@@ -400,6 +400,7 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
         sym.is_tlv = (sym.subsec->isec->hdr.type == S_THREAD_LOCAL_VARIABLES);
       } else {
         sym.value = msym.value;
+        sym.is_tlv = false;
       }
     }
   }
@@ -1317,14 +1318,13 @@ void DylibFile<E>::read_trie(Context<E> &ctx, u8 *start, i64 offset,
   if (*buf) {
     read_uleb(buf); // size
     u32 flags = read_uleb(buf);
-    std::string_view name = save_string(ctx, prefix);
+    std::string_view name;
 
     if (flags & EXPORT_SYMBOL_FLAGS_REEXPORT) {
       read_uleb(buf); // skip a library ordinal
       std::string_view str((char *)buf);
       buf += str.size() + 1;
-      if (!str.empty())
-        name = str;
+      name = !str.empty() ? str : save_string(ctx, prefix);
     } else if (flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) {
       name = save_string(ctx, prefix);
       read_uleb(buf); // stub offset
