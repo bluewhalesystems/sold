@@ -332,6 +332,30 @@ struct Symbol {
   Symbol(std::string_view name) : name(name) {}
   Symbol(const Symbol<E> &other) : name(other.name) {}
 
+  u64 get_addr(Context<E> &ctx) const {
+    if (stub_idx != -1)
+      return ctx.stubs.hdr.addr + stub_idx * E::stub_size;
+    if (subsec) {
+      assert(subsec->is_alive);
+      return subsec->get_addr(ctx) + value;
+    }
+    return value;
+  }
+
+  u64 get_got_addr(Context<E> &ctx) const {
+    assert(got_idx != -1);
+    return ctx.got.hdr.addr + got_idx * sizeof(Word<E>);
+  }
+
+  u64 get_tlv_addr(Context<E> &ctx) const {
+    assert(tlv_idx != -1);
+    return ctx.thread_ptrs.hdr.addr + tlv_idx * sizeof(Word<E>);
+  }
+
+  bool has_stub() const { return stub_idx != -1; }
+  bool has_got() const { return got_idx != -1; }
+  bool has_tlv() const { return tlv_idx != -1; }
+
   std::string_view name;
   InputFile<E> *file = nullptr;
   Subsection<E> *subsec = nullptr;
@@ -374,12 +398,6 @@ struct Symbol {
 
   // For symtab
   i32 output_symtab_idx = -1;
-
-  inline u64 get_addr(Context<E> &ctx) const;
-  inline u64 get_got_addr(Context<E> &ctx) const;
-  inline u64 get_tlv_addr(Context<E> &ctx) const;
-
-  bool has_got() const { return got_idx != -1; }
 };
 
 template <typename E>
@@ -1178,29 +1196,6 @@ std::ostream &operator<<(std::ostream &out, const InputSection<E> &sec) {
   out << sec.file << "(" << sec.hdr.get_segname() << ","
       << sec.hdr.get_sectname() << ")";
   return out;
-}
-
-template <typename E>
-u64 Symbol<E>::get_addr(Context<E> &ctx) const {
-  if (stub_idx != -1)
-    return ctx.stubs.hdr.addr + stub_idx * E::stub_size;
-  if (subsec) {
-    assert(subsec->is_alive);
-    return subsec->get_addr(ctx) + value;
-  }
-  return value;
-}
-
-template <typename E>
-u64 Symbol<E>::get_got_addr(Context<E> &ctx) const {
-  assert(got_idx != -1);
-  return ctx.got.hdr.addr + got_idx * sizeof(Word<E>);
-}
-
-template <typename E>
-u64 Symbol<E>::get_tlv_addr(Context<E> &ctx) const {
-  assert(tlv_idx != -1);
-  return ctx.thread_ptrs.hdr.addr + tlv_idx * sizeof(Word<E>);
 }
 
 template <typename E>
