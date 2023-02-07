@@ -1089,12 +1089,12 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   // path/too/foo.cc), but it looks like lldb doesn't actually use that
   // symbol name. Souce filename is in the debug record and thus naturally
   // lldb can read it, so it doesn't make much sense to parse a debug
-  // record just to set a source filename which will be ighnored. So, we
+  // record just to set a source filename which will be ignored. So, we
   // always set a dummy name "-" as a filename.
   //
   // The following N_OSO symbol specifies a object file path, which is
   // followed by N_FUN, N_STSYM or N_GSYM symbols for functions,
-  // file-visibility global variables and global variables, respectively.
+  // file-scope global variables and global variables, respectively.
   //
   // N_FUN symbol is always emitted as a pair. The first N_FUN symbol
   // specifies the start address of a function, and the second specifies
