@@ -165,7 +165,7 @@ void create_range_extension_thunks(Context<E> &ctx, OutputSection<E> &osec) {
       sym->thunk_sym_idx = i++;
     }
 
-    // Scan relocations again to fix symbol offsets in the last thunk->
+    // Scan relocations again to fix symbol offsets in the last thunk.
     tbb::parallel_for_each(m.begin() + b, m.begin() + c,
                            [&](Subsection<E> *subsec) {
       for (Relocation<E> &r : subsec->get_rels())
