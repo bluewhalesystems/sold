@@ -1103,7 +1103,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   //
   // At the end of stab symbols, we have a N_SO symbol without symbol name
   // as an end marker.
-  if (!ctx.arg.S) {
+  if (!ctx.arg.S && this != ctx.internal_obj) {
     MachSym<E> *stab = buf + this->stabs_offset;
     i64 stab_idx = 2;
 
