@@ -738,7 +738,7 @@ public:
   CodeSignatureSection(Context<E> &ctx)
     : Chunk<E>(ctx, "__LINKEDIT", "__code_signature") {
     this->is_hidden = true;
-    this->hdr.p2align = 3;
+    this->hdr.p2align = 4;
   }
 
   void compute_size(Context<E> &ctx) override;
