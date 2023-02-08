@@ -1137,7 +1137,10 @@ void FunctionStartsSection<E>::compute_size(Context<E> &ctx) {
   std::vector<u64> addrs = flatten(vec);
   tbb::parallel_sort(addrs.begin(), addrs.end());
 
-  contents.resize(addrs.size() * 5);
+  // We need a NUL terminator at the end. We also want to make sure that
+  // the size is a multiple of 8 because the `strip` command assumes that
+  // there's no gap between __func_starts and the following __data_in_code.
+  contents.resize(align_to(addrs.size() * 5 + 1, 8));
 
   u8 *p = contents.data();
   u64 last = ctx.mach_hdr.hdr.addr;
@@ -1147,7 +1150,10 @@ void FunctionStartsSection<E>::compute_size(Context<E> &ctx) {
     last = val;
   }
 
-  this->hdr.size = p - contents.data();
+  // Write the terminator
+  p += write_uleb(p, 0);
+
+  this->hdr.size = align_to(p - contents.data(), 8);
   contents.resize(this->hdr.size);
 }
 
@@ -1263,15 +1269,11 @@ void IndirectSymtabSection<E>::compute_size(Context<E> &ctx) {
   n += ctx.thread_ptrs.syms.size();
 
   ctx.stubs.hdr.reserved1 = n;
-  for (Symbol<E> *sym : ctx.stubs.syms)
-    if (!sym->has_got())
-      n++;
+  n += ctx.stubs.syms.size();
 
   if (ctx.lazy_symbol_ptr) {
     ctx.lazy_symbol_ptr->hdr.reserved1 = n;
-    for (Symbol<E> *sym : ctx.stubs.syms)
-      if (!sym->has_got())
-        n++;
+    n += ctx.stubs.syms.size();
   }
 
   this->hdr.size = n * ENTRY_SIZE;
@@ -1284,8 +1286,6 @@ void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
   auto get_idx = [&](Symbol<E> &sym) -> u32 {
     if (sym.visibility != SCOPE_GLOBAL)
       return INDIRECT_SYMBOL_LOCAL;
-    if (!sym.subsec)
-      return INDIRECT_SYMBOL_ABS;
     return sym.output_symtab_idx;
   };
 
@@ -1296,11 +1296,10 @@ void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
     *buf++ = get_idx(*sym);
 
   for (Symbol<E> *sym : ctx.stubs.syms)
-    if (!sym->has_got())
-      *buf++ = get_idx(*sym);
+    *buf++ = get_idx(*sym);
 
-  for (Symbol<E> *sym : ctx.stubs.syms)
-    if (!sym->has_got())
+  if (ctx.lazy_symbol_ptr)
+    for (Symbol<E> *sym : ctx.stubs.syms)
       *buf++ = get_idx(*sym);
 }
 
