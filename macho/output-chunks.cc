@@ -1281,19 +1281,27 @@ template <typename E>
 void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
 
+  auto get_idx = [&](Symbol<E> &sym) -> u32 {
+    if (sym.visibility != SCOPE_GLOBAL)
+      return INDIRECT_SYMBOL_LOCAL;
+    if (!sym.subsec)
+      return INDIRECT_SYMBOL_ABS;
+    return sym.output_symtab_idx;
+  };
+
   for (Symbol<E> *sym : ctx.got.syms)
-    *buf++ = sym->output_symtab_idx;
+    *buf++ = get_idx(*sym);
 
   for (Symbol<E> *sym : ctx.thread_ptrs.syms)
-    *buf++ = sym->output_symtab_idx;
+    *buf++ = get_idx(*sym);
 
   for (Symbol<E> *sym : ctx.stubs.syms)
     if (!sym->has_got())
-      *buf++ = sym->output_symtab_idx;
+      *buf++ = get_idx(*sym);
 
   for (Symbol<E> *sym : ctx.stubs.syms)
     if (!sym->has_got())
-      *buf++ = sym->output_symtab_idx;
+      *buf++ = get_idx(*sym);
 }
 
 // Create __DATA,__objc_imageinfo section contents by merging input
