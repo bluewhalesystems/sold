@@ -19,25 +19,46 @@ std::ostream &operator<<(std::ostream &out, const Chunk<E> &chunk) {
   return out;
 }
 
+template <typename T>
+static std::vector<u8> to_u8vec(T &data) {
+  std::vector<u8> buf(sizeof(T));
+  memcpy(buf.data(), &data, sizeof(T));
+  return buf;
+}
+
 template <typename E>
 static std::vector<u8> create_pagezero_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(SegmentCommand<E>));
-  SegmentCommand<E> &cmd = *(SegmentCommand<E> *)buf.data();
-
+  SegmentCommand<E> cmd = {};
   cmd.cmd = LC_SEGMENT_64;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   strcpy(cmd.segname, "__PAGEZERO");
   cmd.vmsize = ctx.arg.pagezero_size;
+  return to_u8vec(cmd);
+}
+
+template <typename E>
+static std::vector<u8> create_segment_cmd(Context<E> &ctx, OutputSegment<E> &seg) {
+  i64 nsects = 0;
+  for (Chunk<E> *sec : seg.chunks)
+    if (!sec->is_hidden)
+      nsects++;
+
+  SegmentCommand<E> cmd = seg.cmd;
+  cmd.cmdsize = sizeof(SegmentCommand<E>) + sizeof(MachSection<E>) * nsects;
+  cmd.nsects = nsects;
+
+  std::vector<u8> buf = to_u8vec(cmd);
+  for (Chunk<E> *sec : seg.chunks)
+    if (!sec->is_hidden)
+      append(buf, to_u8vec(sec->hdr));
   return buf;
 }
 
 template <typename E>
 static std::vector<u8> create_dyld_info_only_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(DyldInfoCommand));
-  DyldInfoCommand &cmd = *(DyldInfoCommand *)buf.data();
-
+  DyldInfoCommand cmd = {};
   cmd.cmd = LC_DYLD_INFO_ONLY;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
 
   if (ctx.rebase && ctx.rebase->hdr.size) {
     cmd.rebase_off = ctx.rebase->hdr.offset;
@@ -58,31 +79,26 @@ static std::vector<u8> create_dyld_info_only_cmd(Context<E> &ctx) {
     cmd.export_off = ctx.export_.hdr.offset;
     cmd.export_size = ctx.export_.hdr.size;
   }
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_symtab_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(SymtabCommand));
-  SymtabCommand &cmd = *(SymtabCommand *)buf.data();
-
+  SymtabCommand cmd = {};
   cmd.cmd = LC_SYMTAB;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.symoff = ctx.symtab.hdr.offset;
   cmd.nsyms = ctx.symtab.hdr.size / sizeof(MachSym<E>);
   cmd.stroff = ctx.strtab.hdr.offset;
   cmd.strsize = ctx.strtab.hdr.size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_dysymtab_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(DysymtabCommand));
-  DysymtabCommand &cmd = *(DysymtabCommand *)buf.data();
-
+  DysymtabCommand cmd = {};
   cmd.cmd = LC_DYSYMTAB;
-  cmd.cmdsize = buf.size();
-
+  cmd.cmdsize = sizeof(cmd);
   cmd.ilocalsym = 0;
   cmd.nlocalsym = ctx.symtab.globals_offset;
   cmd.iextdefsym = ctx.symtab.globals_offset;
@@ -91,16 +107,17 @@ static std::vector<u8> create_dysymtab_cmd(Context<E> &ctx) {
   cmd.nundefsym = ctx.symtab.hdr.size / sizeof(MachSym<E>) - ctx.symtab.undefs_offset;
   cmd.indirectsymoff = ctx.indir_symtab.hdr.offset;
   cmd.nindirectsyms  = ctx.indir_symtab.hdr.size / ctx.indir_symtab.ENTRY_SIZE;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_dylinker_cmd(Context<E> &ctx) {
   static constexpr char path[] = "/usr/lib/dyld";
 
-  std::vector<u8> buf(align_to(sizeof(DylinkerCommand) + sizeof(path), 8));
-  DylinkerCommand &cmd = *(DylinkerCommand *)buf.data();
+  i64 size = sizeof(DylinkerCommand) + sizeof(path);
+  std::vector<u8> buf(align_to(size, 8));
 
+  DylinkerCommand &cmd = *(DylinkerCommand *)buf.data();
   cmd.cmd = LC_LOAD_DYLINKER;
   cmd.cmdsize = buf.size();
   cmd.nameoff = sizeof(cmd);
@@ -110,22 +127,21 @@ static std::vector<u8> create_dylinker_cmd(Context<E> &ctx) {
 
 template <typename E>
 static std::vector<u8> create_uuid_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(UUIDCommand));
-  UUIDCommand &cmd = *(UUIDCommand *)buf.data();
-
+  UUIDCommand cmd = {};
   cmd.cmd = LC_UUID;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
 
   assert(sizeof(cmd.uuid) == sizeof(ctx.uuid));
   memcpy(cmd.uuid, ctx.uuid, sizeof(cmd.uuid));
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_build_version_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(BuildVersionCommand) + sizeof(BuildToolVersion));
-  BuildVersionCommand &cmd = *(BuildVersionCommand *)buf.data();
+  i64 size = sizeof(BuildVersionCommand) + sizeof(BuildToolVersion);
+  std::vector<u8> buf(align_to(size, 8));
 
+  BuildVersionCommand &cmd = *(BuildVersionCommand *)buf.data();
   cmd.cmd = LC_BUILD_VERSION;
   cmd.cmdsize = buf.size();
   cmd.platform = ctx.arg.platform;
@@ -141,24 +157,20 @@ static std::vector<u8> create_build_version_cmd(Context<E> &ctx) {
 
 template <typename E>
 static std::vector<u8> create_source_version_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(SourceVersionCommand));
-  SourceVersionCommand &cmd = *(SourceVersionCommand *)buf.data();
-
+  SourceVersionCommand cmd = {};
   cmd.cmd = LC_SOURCE_VERSION;
-  cmd.cmdsize = buf.size();
-  return buf;
+  cmd.cmdsize = sizeof(cmd);
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_main_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(EntryPointCommand));
-  EntryPointCommand &cmd = *(EntryPointCommand *)buf.data();
-
+  EntryPointCommand cmd = {};
   cmd.cmd = LC_MAIN;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.entryoff = ctx.arg.entry->get_addr(ctx) - ctx.mach_hdr.hdr.addr;
   cmd.stacksize = ctx.arg.stack_size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
@@ -166,15 +178,17 @@ static std::vector<u8>
 create_load_dylib_cmd(Context<E> &ctx, DylibFile<E> &dylib) {
   i64 size = sizeof(DylibCommand) + dylib.install_name.size() + 1; // +1 for NUL
   std::vector<u8> buf(align_to(size, 8));
+
+  auto get_type = [&] {
+    if (dylib.is_reexported)
+      return LC_REEXPORT_DYLIB;
+    if (dylib.is_weak)
+      return LC_LOAD_WEAK_DYLIB;
+    return LC_LOAD_DYLIB;
+  };
+
   DylibCommand &cmd = *(DylibCommand *)buf.data();
-
-  if (dylib.is_reexported)
-    cmd.cmd = LC_REEXPORT_DYLIB;
-  else if (dylib.is_weak)
-    cmd.cmd = LC_LOAD_WEAK_DYLIB;
-  else
-    cmd.cmd = LC_LOAD_DYLIB;
-
+  cmd.cmd = get_type();
   cmd.cmdsize = buf.size();
   cmd.nameoff = sizeof(cmd);
   cmd.timestamp = 2;
@@ -188,8 +202,8 @@ template <typename E>
 static std::vector<u8> create_rpath_cmd(Context<E> &ctx, std::string_view name) {
   i64 size = sizeof(RpathCommand) + name.size() + 1; // +1 for NUL
   std::vector<u8> buf(align_to(size, 8));
-  RpathCommand &cmd = *(RpathCommand *)buf.data();
 
+  RpathCommand &cmd = *(RpathCommand *)buf.data();
   cmd.cmd = LC_RPATH;
   cmd.cmdsize = buf.size();
   cmd.path_off = sizeof(cmd);
@@ -199,58 +213,50 @@ static std::vector<u8> create_rpath_cmd(Context<E> &ctx, std::string_view name) 
 
 template <typename E>
 static std::vector<u8> create_function_starts_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(LinkEditDataCommand));
-  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
-
+  LinkEditDataCommand cmd = {};
   cmd.cmd = LC_FUNCTION_STARTS;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.dataoff = ctx.function_starts->hdr.offset;
   cmd.datasize = ctx.function_starts->hdr.size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_data_in_code_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(LinkEditDataCommand));
-  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
-
+  LinkEditDataCommand cmd = {};
   cmd.cmd = LC_DATA_IN_CODE;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.dataoff = ctx.data_in_code->hdr.offset;
   cmd.datasize = ctx.data_in_code->hdr.size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_dyld_chained_fixups(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(LinkEditDataCommand));
-  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
-
+  LinkEditDataCommand cmd = {};
   cmd.cmd = LC_DYLD_CHAINED_FIXUPS;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.dataoff = ctx.chained_fixups->hdr.offset;
   cmd.datasize = ctx.chained_fixups->hdr.size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_dyld_exports_trie(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(LinkEditDataCommand));
-  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
-
+  LinkEditDataCommand cmd = {};
   cmd.cmd = LC_DYLD_EXPORTS_TRIE;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.dataoff = ctx.export_.hdr.offset;
   cmd.datasize = ctx.export_.hdr.size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
 static std::vector<u8> create_sub_framework_cmd(Context<E> &ctx) {
   i64 size = sizeof(UmbrellaCommand) + ctx.arg.umbrella.size() + 1;
   std::vector<u8> buf(align_to(size, 8));
-  UmbrellaCommand &cmd = *(UmbrellaCommand *)buf.data();
 
+  UmbrellaCommand &cmd = *(UmbrellaCommand *)buf.data();
   cmd.cmd = LC_SUB_FRAMEWORK;
   cmd.cmdsize = buf.size();
   cmd.umbrella_off = sizeof(cmd);
@@ -260,10 +266,10 @@ static std::vector<u8> create_sub_framework_cmd(Context<E> &ctx) {
 
 template <typename E>
 static std::vector<u8> create_id_dylib_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(DylibCommand) +
-                      align_to(ctx.arg.final_output.size() + 1, 8));
-  DylibCommand &cmd = *(DylibCommand *)buf.data();
+  i64 size = sizeof(DylibCommand) + ctx.arg.final_output.size() + 1;
+  std::vector<u8> buf(align_to(size, 8));
 
+  DylibCommand &cmd = *(DylibCommand *)buf.data();
   cmd.cmd = LC_ID_DYLIB;
   cmd.cmdsize = buf.size();
   cmd.nameoff = sizeof(cmd);
@@ -273,14 +279,12 @@ static std::vector<u8> create_id_dylib_cmd(Context<E> &ctx) {
 
 template <typename E>
 static std::vector<u8> create_code_signature_cmd(Context<E> &ctx) {
-  std::vector<u8> buf(sizeof(LinkEditDataCommand));
-  LinkEditDataCommand &cmd = *(LinkEditDataCommand *)buf.data();
-
+  LinkEditDataCommand cmd = {};
   cmd.cmd = LC_CODE_SIGNATURE;
-  cmd.cmdsize = buf.size();
+  cmd.cmdsize = sizeof(cmd);
   cmd.dataoff = ctx.code_sig->hdr.offset;
   cmd.datasize = ctx.code_sig->hdr.size;
-  return buf;
+  return to_u8vec(cmd);
 }
 
 template <typename E>
@@ -290,33 +294,8 @@ static std::vector<std::vector<u8>> create_load_commands(Context<E> &ctx) {
   if (ctx.arg.pagezero_size)
     vec.push_back(create_pagezero_cmd(ctx));
 
-  auto append = [&](std::vector<u8> &buf, auto &x) {
-    i64 off = buf.size();
-    buf.resize(buf.size() + sizeof(x));
-    memcpy(buf.data() + off, &x, sizeof(x));
-  };
-
-  // Add LC_SEGMENT_64 comamnds
-  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments) {
-    std::vector<u8> &buf = vec.emplace_back();
-
-    i64 nsects = 0;
-    for (Chunk<E> *sec : seg->chunks)
-      if (!sec->is_hidden)
-        nsects++;
-
-    SegmentCommand<E> cmd = seg->cmd;
-    cmd.cmdsize = sizeof(SegmentCommand<E>) + sizeof(MachSection<E>) * nsects;
-    cmd.nsects = nsects;
-    append(buf, cmd);
-
-    for (Chunk<E> *sec : seg->chunks) {
-      if (!sec->is_hidden) {
-        sec->hdr.set_segname(cmd.segname);
-        append(buf, sec->hdr);
-      }
-    }
-  }
+  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
+    vec.push_back(create_segment_cmd(ctx, *seg));
 
   if (ctx.chained_fixups && ctx.chained_fixups->hdr.size) {
     vec.push_back(create_dyld_chained_fixups(ctx));

@@ -492,6 +492,13 @@ static void create_synthetic_chunks(Context<E> &ctx) {
     }
   }
 
+  // Even though redundant, section headers have its containing segments name
+  // in Mach-O.
+  for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
+    for (Chunk<E> *chunk : seg->chunks)
+      if (!chunk->is_hidden)
+        chunk->hdr.set_segname(seg->cmd.segname);
+
   // Sort segments and output sections.
   sort(ctx.segments, compare_segments<E>);
 
