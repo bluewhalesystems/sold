@@ -316,8 +316,7 @@ enum {
   NEEDS_GOT              = 1 << 0,
   NEEDS_STUB             = 1 << 1,
   NEEDS_THREAD_PTR       = 1 << 2,
-  NEEDS_OBJC_STUB        = 1 << 3,
-  NEEDS_RANGE_EXTN_THUNK = 1 << 4,
+  NEEDS_RANGE_EXTN_THUNK = 1 << 3,
 };
 
 enum {
@@ -1070,6 +1069,7 @@ struct Context {
     bool search_paths_first = true;
     bool stats = false;
     bool trace = false;
+    bool undefined_error = true;
     bool x = false;
     i64 arch = CPU_TYPE_ARM64;
     i64 filler = 0;

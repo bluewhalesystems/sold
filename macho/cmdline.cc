@@ -112,6 +112,8 @@ Options:
   -t                          Print out each file the linker loads
   -thread_count <NUMBER>      Use given number of threads
   -u <SYMBOL>                 Force load a given symbol from archive if necessary
+  -undefined [ error | warning | suppress | dynamic_lookup ]
+                              Specify how to handle undefined symbols
   -umbrella <FRAMEWORK_NAME>  Specify an umbrella framework name
   -unexported_symbol <SYMBOL> Export all but a given symbol
   -unexported_symbols_list <FILE>
@@ -525,6 +527,13 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.thread_count = std::stoi(std::string(arg));
     } else if (read_arg("-u")) {
       ctx.arg.u.push_back(std::string(arg));
+    } else if (read_arg("-undefined")) {
+      if (arg == "error")
+        ctx.arg.undefined_error = true;
+      else if (arg == "warning" || arg == "suppress" || arg == "dynamic_lookup")
+        ctx.arg.undefined_error = false;
+      else
+        Fatal(ctx) << "unknown -undefined argument: " << arg;
     } else if (read_arg("-umbrella")) {
       ctx.arg.umbrella = arg;
     } else if (read_arg("-unexported_symbol")) {

@@ -381,6 +381,38 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
     }
   }
 
+  // Find all undefined symbols
+  std::vector<std::vector<Symbol<E> *>> msgsend_syms(ctx.objs.size());
+  std::vector<std::vector<Symbol<E> *>> other_syms(ctx.objs.size());
+
+  auto is_null = [](InputFile<E> **ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_RELAXED) == nullptr;
+  };
+
+  auto compare_exchange = [](InputFile<E> **ptr, InputFile<E> *desired) {
+    InputFile<E> *expected = nullptr;
+    return __atomic_compare_exchange_n(ptr, &expected, desired, false,
+                                       __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  };
+
+  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
+    for (Symbol<E> *sym : ctx.objs[i]->syms) {
+      InputFile<E> *expected = nullptr;
+      if (is_null(&sym->file) &&
+          (sym->name.starts_with("_objc_msgSend$") || !ctx.arg.undefined_error) &&
+          compare_exchange(&sym->file, ctx.internal_obj)) {
+        if (sym->name.starts_with("_objc_msgSend$")) {
+          msgsend_syms[i].push_back(sym);
+        } else {
+          other_syms[i].push_back(sym);
+          sym->is_imported = true;
+        }
+      }
+    }
+  });
+
+  auto less = [](Symbol<E> *a, Symbol<E> *b) { return a->name < b->name; };
+
   // _objc_msgSend is the underlying function of the Objective-C's dynamic
   // message dispatching. The function takes an receiver object and an
   // interned method name string as the first and the second arguments,
@@ -398,29 +430,20 @@ static void claim_unresolved_symbols(Context<E> &ctx) {
   // Apple did it as a size optimization. Since the code stub is now
   // shared among functions that call the same class with the same
   // message, it can reduce the output file size.
-  std::vector<std::vector<Symbol<E> *>> vec(ctx.objs.size());
+  std::vector<Symbol<E> *> msgsend_syms2 = flatten(msgsend_syms);
+  tbb::parallel_sort(msgsend_syms2.begin(), msgsend_syms2.end(), less);
 
-  tbb::parallel_for((i64)0, (i64)ctx.objs.size(), [&](i64 i) {
-    for (Symbol<E> *sym : ctx.objs[i]->syms)
-      if (!sym->file && sym->name.starts_with("_objc_msgSend$"))
-        if (!(sym->flags.fetch_or(NEEDS_OBJC_STUB) & NEEDS_OBJC_STUB))
-          vec[i].push_back(sym);
-  });
-
-  std::vector<Symbol<E> *> syms = flatten(vec);
-
-  if (!syms.empty()) {
+  if (!msgsend_syms2.empty()) {
     ctx.objc_stubs.reset(new ObjcStubsSection<E>(ctx));
-
-    tbb::parallel_sort(syms.begin(), syms.end(), [](Symbol<E> *a, Symbol<E> *b) {
-      return a->name < b->name;
-    });
-
-    for (Symbol<E> *sym : syms) {
+    for (Symbol<E> *sym : msgsend_syms2)
       ctx.internal_obj->add_msgsend_symbol(ctx, *sym);
-      sym->flags = 0;
-    }
   }
+
+  // Promote remaining undefined symbols to dynamic symbols if
+  // -undefined [ warning | suppress | dynamic_lookup ] was given.
+  std::vector<Symbol<E> *> other_syms2 = flatten(other_syms);
+  tbb::parallel_sort(other_syms2.begin(), other_syms2.end(), less);
+  append(ctx.internal_obj->syms, other_syms2);
 }
 
 template <typename E>
