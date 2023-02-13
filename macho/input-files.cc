@@ -21,6 +21,7 @@ void InputFile<E>::clear_symbols() {
       sym->is_exported = false;
       sym->is_common = false;
       sym->is_weak = false;
+      sym->is_abs = false;
       sym->is_tlv = false;
       sym->no_dead_strip = false;
       sym->subsec = nullptr;
@@ -382,13 +383,11 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
 
     sym.file = this;
     sym.visibility = SCOPE_LOCAL;
-    sym.is_common = false;
-    sym.is_weak = false;
     sym.no_dead_strip = (msym.desc & N_NO_DEAD_STRIP);
 
     if (msym.type == N_ABS) {
       sym.value = msym.value;
-      sym.is_tlv = false;
+      sym.is_abs = true;
     } else if (!msym.stab && msym.type == N_SECT) {
       sym.subsec = sym_to_subsec[i];
       if (!sym.subsec)
@@ -400,7 +399,6 @@ void ObjectFile<E>::parse_symbols(Context<E> &ctx) {
         sym.is_tlv = (sym.subsec->isec->hdr.type == S_THREAD_LOCAL_VARIABLES);
       } else {
         sym.value = msym.value;
-        sym.is_tlv = false;
       }
     }
   }
@@ -697,18 +695,21 @@ void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
         sym.subsec = nullptr;
         sym.value = msym.value;
         sym.is_common = true;
+        sym.is_abs = false;
         sym.is_tlv = false;
         break;
       case N_ABS:
         sym.subsec = nullptr;
         sym.value = msym.value;
         sym.is_common = false;
+        sym.is_abs = true;
         sym.is_tlv = false;
         break;
       case N_SECT:
         sym.subsec = sym_to_subsec[i];
         sym.value = msym.value - sym.subsec->input_addr;
         sym.is_common = false;
+        sym.is_abs = false;
         sym.is_tlv = (sym.subsec->isec->hdr.type == S_THREAD_LOCAL_VARIABLES);
         break;
       default:
@@ -795,6 +796,7 @@ void ObjectFile<E>::convert_common_symbols(Context<E> &ctx) {
       sym.subsec = subsec;
       sym.value = 0;
       sym.is_common = false;
+      sym.is_abs = false;
       sym.is_tlv = false;
     }
   }
@@ -1028,7 +1030,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
   // and read debug info from object files.
   //
   // Debug symbols are called "stab" symbols.
-  if (!ctx.arg.S) {
+  if (!ctx.arg.S && this != ctx.internal_obj) {
     this->oso_name = get_oso_name();
     if (!ctx.arg.oso_prefix.empty() &&
         this->oso_name.starts_with(ctx.arg.oso_prefix))
@@ -1107,12 +1109,12 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
     MachSym<E> *stab = buf + this->stabs_offset;
     i64 stab_idx = 2;
 
-    stab[0].stroff = 1; // string "-"
+    stab[0].stroff = 2; // string "-"
     stab[0].n_type = N_SO;
-    stab[0].desc = 1;
 
     stab[1].stroff = stroff;
     stab[1].n_type = N_OSO;
+    stab[1].sect = E::cpusubtype;
     stab[1].desc = 1;
     stroff += write_string(strtab + stroff, this->oso_name);
 
@@ -1127,8 +1129,9 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
 
       if (sym->subsec->isec->hdr.is_text()) {
         stab[stab_idx].n_type = N_FUN;
+        stab[stab_idx + 1].stroff = 1; // empty string
         stab[stab_idx + 1].n_type = N_FUN;
-        stab[stab_idx + 1].sect = sym->subsec->input_size;
+        stab[stab_idx + 1].value = sym->subsec->input_size;
         stab_idx += 2;
       } else {
         stab[stab_idx].n_type = (sym->visibility == SCOPE_LOCAL) ? N_STSYM : N_GSYM;
@@ -1137,17 +1140,15 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
     }
 
     assert(stab_idx == this->num_stabs - 1);
+    stab[stab_idx].stroff = 1; // empty string
     stab[stab_idx].n_type = N_SO;
-    stab[stab_idx].desc = 1;
+    stab[stab_idx].sect = 1;
   }
 
   // Copy symbols from input symtabs to the output sytmab
   for (i64 i = 0; i < this->syms.size(); i++) {
     Symbol<E> *sym = this->syms[i];
     if (!sym || sym->file != this || sym->output_symtab_idx == -1)
-      continue;
-
-    if (ctx.arg.x && sym->visibility == SCOPE_LOCAL)
       continue;
 
     MachSym<E> &msym = buf[sym->output_symtab_idx];
@@ -1431,6 +1432,7 @@ void DylibFile<E>::resolve_symbols(Context<E> &ctx) {
       sym.subsec = nullptr;
       sym.value = 0;
       sym.is_common = false;
+      sym.is_abs = false;
       sym.is_tlv = (kind == EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL);
     }
   }

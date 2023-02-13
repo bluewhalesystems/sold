@@ -1263,6 +1263,10 @@ void IndirectSymtabSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = (ul32 *)(ctx.buf + this->hdr.offset);
 
   auto get_idx = [&](Symbol<E> &sym) -> u32 {
+    if (sym.is_abs && sym.visibility != SCOPE_GLOBAL)
+      return INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL;
+    if (sym.is_abs)
+      return INDIRECT_SYMBOL_ABS;
     if (sym.visibility != SCOPE_GLOBAL)
       return INDIRECT_SYMBOL_LOCAL;
     return sym.output_symtab_idx;

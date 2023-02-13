@@ -372,6 +372,7 @@ struct Symbol {
   u8 visibility : 2 = SCOPE_LOCAL;
   bool is_common : 1 = false;
   bool is_weak : 1 = false;
+  bool is_abs : 1 = false;
   bool is_tlv : 1 = false;
   bool no_dead_strip : 1 = false;
 
@@ -656,7 +657,7 @@ public:
   i64 globals_offset = 0;
   i64 undefs_offset = 0;
 
-  static constexpr std::string_view strtab_init_image = "\0-\0"sv;
+  static constexpr std::string_view strtab_init_image = " \0-\0"sv;
 };
 
 template <typename E>
