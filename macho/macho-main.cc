@@ -893,7 +893,7 @@ static void read_file(Context<E> &ctx, MappedFile<Context<E>> *mf) {
     DylibFile<E> *file = DylibFile<E>::create(ctx, mf);
     ctx.tg.run([file, &ctx] { file->parse(ctx); });
     ctx.dylibs.push_back(file);
- break;
+    break;
   }
   case FileType::MACH_OBJ:
   case FileType::LLVM_BITCODE: {
@@ -1190,6 +1190,9 @@ static void print_stats(Context<E> &ctx) {
       if (isec)
         rels += isec->rels.size();
   }
+
+  static Counter num_objs("num_objs", ctx.objs.size());
+  static Counter num_dylibs("num_dylibs", ctx.dylibs.size());
 
   Counter::print();
 }
