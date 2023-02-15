@@ -14,16 +14,16 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
 
   static_assert(E::stub_size == sizeof(insn));
 
-  for (i64 i = 0, j = 0; i < syms.size(); i++) {
+  for (i64 i = 0; i < syms.size(); i++) {
     memcpy(buf, insn, sizeof(insn));
 
     u64 this_addr = this->hdr.addr + i * 6;
 
     u64 ptr_addr;
-    if (syms[i]->has_got())
-      ptr_addr = syms[i]->get_got_addr(ctx);
+    if (ctx.lazy_symbol_ptr)
+      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + sizeof(Word<E>) * i;
     else
-      ptr_addr = ctx.lazy_symbol_ptr->hdr.addr + sizeof(Word<E>) * j++;
+      ptr_addr = syms[i]->get_got_addr(ctx);
 
     *(ul32 *)(buf + 2) = ptr_addr - this_addr - 6;
     buf += sizeof(insn);
@@ -51,10 +51,7 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 
   buf += sizeof(insn0);
 
-  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms) {
-    if (sym->has_got())
-      continue;
-
+  for (i64 i = 0; i < ctx.stubs.syms.size(); i++) {
     u8 insn[] = {
       0x68, 0, 0, 0, 0, // push $bind_offset
       0xe9, 0, 0, 0, 0, // jmp $__stub_helper
@@ -66,7 +63,6 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
     *(ul32 *)(buf + 1) = ctx.lazy_bind->bind_offsets[i];
     *(ul32 *)(buf + 6) = start - buf - 10;
     buf += sizeof(insn);
-    i++;
   }
 }
 

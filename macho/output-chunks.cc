@@ -931,11 +931,9 @@ template <typename E>
 void LazyBindSection<E>::compute_size(Context<E> &ctx) {
   bind_offsets.clear();
 
-  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms) {
-    if (!sym->has_got()) {
-      bind_offsets.push_back(contents.size());
-      add(ctx, *sym, i++);
-    }
+  for (i64 i = 0; i < ctx.stubs.syms.size(); i++) {
+    bind_offsets.push_back(contents.size());
+    add(ctx, *ctx.stubs.syms[i], i);
   }
 
   contents.resize(align_to(contents.size(), 1 << this->hdr.p2align));
@@ -1880,7 +1878,7 @@ void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
   syms.push_back(sym);
   this->hdr.size = syms.size() * E::stub_size;
 
-  if (!sym->has_got()) {
+  if (ctx.stub_helper) {
     if (ctx.stub_helper->hdr.size == 0)
       ctx.stub_helper->hdr.size = E::stub_helper_hdr_size;
 
@@ -2085,10 +2083,9 @@ template <typename E>
 void LazySymbolPtrSection<E>::copy_buf(Context<E> &ctx) {
   u64 *buf = (u64 *)(ctx.buf + this->hdr.offset);
 
-  for (i64 i = 0; Symbol<E> *sym : ctx.stubs.syms)
-    if (!sym->has_got())
-      *buf++ = ctx.stub_helper->hdr.addr + E::stub_helper_hdr_size +
-               i++ * E::stub_helper_size;
+  for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
+    *buf++ = ctx.stub_helper->hdr.addr + E::stub_helper_hdr_size +
+             E::stub_helper_size * i;
 }
 
 template <typename E>
