@@ -688,26 +688,17 @@ static void merge_mergeable_sections(Context<E> &ctx) {
 }
 
 template <typename E>
-static void scan_unwind_info(Context<E> &ctx) {
-  Timer t(ctx, "scan_unwind_info");
-
-  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    for (Subsection<E> *subsec : file->subsections)
-      for (UnwindRecord<E> &rec : subsec->get_unwind_records())
-        if (rec.personality)
-          rec.personality->flags |= NEEDS_GOT;
-  });
-}
-
-template <typename E>
 static void scan_relocations(Context<E> &ctx) {
   Timer t(ctx, "scan_relocations");
 
-  for (ObjectFile<E> *file : ctx.objs)
-    for (Subsection<E> *subsec : file->subsections)
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    for (Subsection<E> *subsec : file->subsections) {
       subsec->scan_relocations(ctx);
-
-  scan_unwind_info(ctx);
+      for (UnwindRecord<E> &rec : subsec->get_unwind_records())
+        if (rec.personality)
+          rec.personality->flags |= NEEDS_GOT;
+    }
+  });
 
   std::vector<InputFile<E> *> files;
   append(files, ctx.objs);
