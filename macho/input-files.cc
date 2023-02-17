@@ -517,7 +517,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
                  << " " << *this->syms[r.idx];
     };
 
-    if (r.p2size != 3 || r.type != E::abs_rel)
+    if ((1 << r.p2size) != sizeof(Word<E>) || r.type != E::abs_rel)
       error();
 
     switch (r.offset % sizeof(CompactUnwindEntry<E>)) {
@@ -532,7 +532,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
         error();
 
       dst.subsec = target;
-      dst.offset = src[idx].code_start - target->input_addr;
+      dst.offset = target->input_addr - src[idx].code_start;
       break;
     }
     case offsetof(CompactUnwindEntry<E>, personality):
@@ -560,7 +560,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
         error();
 
       dst.lsda = target;
-      dst.lsda_offset = addr - target->input_addr;
+      dst.lsda_offset = target->input_addr - addr;
       break;
     }
     default:

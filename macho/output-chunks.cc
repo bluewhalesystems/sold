@@ -1993,6 +1993,7 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
   page1->page_offset = 0;
   page1->lsda_offset = (u8 *)lsda - buf.data();
 
+  assert((u8 *)page2 <= buf.data() + buf.size());
   buf.resize((u8 *)page2 - buf.data());
   return buf;
 }
@@ -2014,7 +2015,7 @@ template <typename E>
 std::vector<std::span<UnwindRecord<E>>>
 UnwindEncoder<E>::split_records(Context<E> &ctx,
                                 std::span<UnwindRecord<E>> records) {
-  constexpr i64 max_group_size = 4096;
+  constexpr i64 max_group_size = 200;
   std::vector<std::span<UnwindRecord<E>>> vec;
 
   while (!records.empty()) {
