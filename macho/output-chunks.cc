@@ -1890,11 +1890,11 @@ void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
 template <typename E>
 class UnwindEncoder {
 public:
-  std::vector<u8> encode(Context<E> &ctx, std::span<UnwindRecord<E>> records);
+  std::vector<u8> encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records);
   u32 encode_personality(Context<E> &ctx, u64 addr);
 
-  std::vector<std::span<UnwindRecord<E>>>
-  split_records(Context<E> &ctx, std::span<UnwindRecord<E>> records);
+  std::vector<std::span<UnwindRecord<E> *>>
+  split_records(Context<E> &ctx, std::span<UnwindRecord<E> *> records);
 
   std::vector<u64> personalities;
 };
@@ -1904,7 +1904,7 @@ public:
 // and don't have LSDA), we can merge the two.
 template <typename E>
 static void
-merge_unwind_records(Context<E> &ctx, std::span<UnwindRecord<E>> &records) {
+merge_unwind_records(Context<E> &ctx, std::span<UnwindRecord<E> *> &records) {
   auto can_merge = [&](UnwindRecord<E> &a, UnwindRecord<E> &b) {
     // As a special case, we don't merge unwind records with STACK_IND
     // encoding even if their encodings look the same. It is because the
@@ -1925,8 +1925,8 @@ merge_unwind_records(Context<E> &ctx, std::span<UnwindRecord<E>> &records) {
 
   i64 i = 0;
   for (i64 j = 1; j < records.size(); j++) {
-    if (can_merge(records[i], records[j]))
-      records[i].code_len += records[j].code_len;
+    if (can_merge(*records[i], *records[j]))
+      records[i]->code_len += records[j]->code_len;
     else
       records[++i] = records[j];
   }
@@ -1935,22 +1935,22 @@ merge_unwind_records(Context<E> &ctx, std::span<UnwindRecord<E>> &records) {
 
 template <typename E>
 std::vector<u8>
-UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
+UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records) {
   i64 num_lsda = 0;
 
-  for (UnwindRecord<E> &rec : records) {
-    if (rec.personality)
-      rec.encoding |= encode_personality(ctx, rec.personality->get_got_addr(ctx));
-    if (rec.lsda)
+  for (UnwindRecord<E> *rec : records) {
+    if (rec->personality)
+      rec->encoding |= encode_personality(ctx, rec->personality->get_got_addr(ctx));
+    if (rec->lsda)
       num_lsda++;
   }
 
-  sort(records, [&](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
-    return a.get_func_addr(ctx) < b.get_func_addr(ctx);
+  sort(records, [&](const UnwindRecord<E> *a, const UnwindRecord<E> *b) {
+    return a->get_func_addr(ctx) < b->get_func_addr(ctx);
   });
 
   merge_unwind_records(ctx, records);
-  std::vector<std::span<UnwindRecord<E>>> pages = split_records(ctx, records);
+  std::vector<std::span<UnwindRecord<E> *>> pages = split_records(ctx, records);
 
   // Compute the size of the buffer.
   i64 size = sizeof(UnwindSectionHeader) +
@@ -1983,31 +1983,31 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
   UnwindLsdaEntry *lsda = (UnwindLsdaEntry *)(page1 + (pages.size() + 1));
   UnwindSecondLevelPage *page2 = (UnwindSecondLevelPage *)(lsda + num_lsda);
 
-  for (std::span<UnwindRecord<E>> span : pages) {
-    page1->func_addr = span[0].get_func_addr(ctx);
+  for (std::span<UnwindRecord<E> *> span : pages) {
+    page1->func_addr = span[0]->get_func_addr(ctx);
     page1->page_offset = (u8 *)page2 - buf.data();
     page1->lsda_offset = (u8 *)lsda - buf.data();
 
-    for (UnwindRecord<E> &rec : span) {
-      if (rec.lsda) {
-        lsda->func_addr = rec.get_func_addr(ctx);
-        lsda->lsda_addr = rec.lsda->get_addr(ctx) + rec.lsda_offset;
+    for (UnwindRecord<E> *rec : span) {
+      if (rec->lsda) {
+        lsda->func_addr = rec->get_func_addr(ctx);
+        lsda->lsda_addr = rec->lsda->get_addr(ctx) + rec->lsda_offset;
         lsda++;
       }
     }
 
     std::unordered_map<u32, u32> map;
-    for (UnwindRecord<E> &rec : span)
-      map.insert({rec.encoding, map.size()});
+    for (UnwindRecord<E> *rec : span)
+      map.insert({rec->encoding, map.size()});
 
     page2->kind = UNWIND_SECOND_LEVEL_COMPRESSED;
     page2->page_offset = sizeof(UnwindSecondLevelPage);
     page2->page_count = span.size();
 
     UnwindPageEntry *entry = (UnwindPageEntry *)(page2 + 1);
-    for (UnwindRecord<E> &rec : span) {
-      entry->func_addr = rec.get_func_addr(ctx) - page1->func_addr;
-      entry->encoding = map[rec.encoding];
+    for (UnwindRecord<E> *rec : span) {
+      entry->func_addr = rec->get_func_addr(ctx) - page1->func_addr;
+      entry->encoding = map[rec->encoding];
       entry++;
     }
 
@@ -2023,7 +2023,7 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
   }
 
   // Write a terminator
-  UnwindRecord<E> &last = records[records.size() - 1];
+  UnwindRecord<E> &last = *records[records.size() - 1];
   page1->func_addr = last.subsec->get_addr(ctx) + last.subsec->input_size + 1;
   page1->page_offset = 0;
   page1->lsda_offset = (u8 *)lsda - buf.data();
@@ -2047,17 +2047,17 @@ u32 UnwindEncoder<E>::encode_personality(Context<E> &ctx, u64 addr) {
 }
 
 template <typename E>
-std::vector<std::span<UnwindRecord<E>>>
+std::vector<std::span<UnwindRecord<E> *>>
 UnwindEncoder<E>::split_records(Context<E> &ctx,
-                                std::span<UnwindRecord<E>> records) {
+                                std::span<UnwindRecord<E> *> records) {
   constexpr i64 max_group_size = 200;
-  std::vector<std::span<UnwindRecord<E>>> vec;
+  std::vector<std::span<UnwindRecord<E> *>> vec;
 
   while (!records.empty()) {
-    u64 end_addr = records[0].get_func_addr(ctx) + (1 << 24);
+    u64 end_addr = records[0]->get_func_addr(ctx) + (1 << 24);
     i64 i = 1;
     while (i < records.size() && i < max_group_size &&
-           records[i].get_func_addr(ctx) < end_addr)
+           records[i]->get_func_addr(ctx) < end_addr)
       i++;
     vec.push_back(records.subspan(0, i));
     records = records.subspan(i);
@@ -2067,14 +2067,14 @@ UnwindEncoder<E>::split_records(Context<E> &ctx,
 
 template <typename E>
 static std::vector<u8> construct_unwind_info(Context<E> &ctx) {
-  std::vector<UnwindRecord<E>> records;
+  std::vector<UnwindRecord<E> *> records;
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
     for (Chunk<E> *chunk : seg->chunks)
       if (OutputSection<E> *osec = chunk->to_osec())
         for (Subsection<E> *subsec : osec->members)
           for (UnwindRecord<E> &rec : subsec->get_unwind_records())
-            records.push_back(rec);
+            records.push_back(&rec);
 
   if (records.empty())
     return {};
