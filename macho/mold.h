@@ -836,6 +836,10 @@ public:
 
   void compute_size(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
+
+  i64 num_lsda = 0;
+  std::vector<Symbol<E> *> personalities;
+  std::vector<std::vector<UnwindRecord<E> *>> pages;
 };
 
 template <typename E>

@@ -1888,77 +1888,19 @@ void StubsSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
 }
 
 template <typename E>
-class UnwindEncoder {
-public:
-  std::vector<u8> encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records);
-  u32 encode_personality(Context<E> &ctx, u64 addr);
-
-  std::vector<std::span<UnwindRecord<E> *>>
-  split_records(Context<E> &ctx, std::span<UnwindRecord<E> *> records);
-
-  std::vector<u64> personalities;
-};
-
-// If two unwind records covers adjascent functions and have identical
-// contents (i.e. have the same encoding, the same personality function
-// and don't have LSDA), we can merge the two.
-template <typename E>
-static void
-merge_unwind_records(Context<E> &ctx, std::span<UnwindRecord<E> *> &records) {
-  auto can_merge = [&](UnwindRecord<E> &a, UnwindRecord<E> &b) {
-    // As a special case, we don't merge unwind records with STACK_IND
-    // encoding even if their encodings look the same. It is because the
-    // real encoding for that record type is encoded in the instruction
-    // stream and therefore the real encodings might be different.
-    if constexpr (is_x86<E>)
-      if ((a.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND ||
-          (b.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND)
-        return false;
-
-    return a.get_func_addr(ctx) + a.code_len == b.get_func_addr(ctx) &&
-           a.encoding == b.encoding &&
-           a.personality == b.personality &&
-           !a.lsda && !b.lsda;
-  };
-
-  assert(!records.empty());
-
-  i64 i = 0;
-  for (i64 j = 1; j < records.size(); j++) {
-    if (can_merge(*records[i], *records[j]))
-      records[i]->code_len += records[j]->code_len;
-    else
-      records[++i] = records[j];
-  }
-  records = records.subspan(0, i + 1);
-}
-
-template <typename E>
 std::vector<u8>
-UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records) {
-  i64 num_lsda = 0;
-
-  for (UnwindRecord<E> *rec : records) {
-    if (rec->personality)
-      rec->encoding |= encode_personality(ctx, rec->personality->get_got_addr(ctx));
-    if (rec->lsda)
-      num_lsda++;
-  }
-
-  sort(records, [&](const UnwindRecord<E> *a, const UnwindRecord<E> *b) {
-    return a->get_func_addr(ctx) < b->get_func_addr(ctx);
-  });
-
-  merge_unwind_records(ctx, records);
-  std::vector<std::span<UnwindRecord<E> *>> pages = split_records(ctx, records);
-
+encode_unwind_info(Context<E> &ctx, std::vector<Symbol<E> *> personalities,
+                   std::vector<std::vector<UnwindRecord<E> *>> &pages,
+                   i64 num_lsda) {
   // Compute the size of the buffer.
   i64 size = sizeof(UnwindSectionHeader) +
              personalities.size() * 4 +
              sizeof(UnwindFirstLevelPage) * (pages.size() + 1) +
              sizeof(UnwindSecondLevelPage) * pages.size() +
-             (sizeof(UnwindPageEntry) + 4) * records.size() +
              sizeof(UnwindLsdaEntry) * num_lsda;
+
+  for (std::span<UnwindRecord<E> *> span : pages)
+    size += (sizeof(UnwindPageEntry) + 4) * span.size();
 
   // Allocate an output buffer.
   std::vector<u8> buf(size);
@@ -1975,8 +1917,8 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records) 
 
   // Write the personalities
   ul32 *per = (ul32 *)(buf.data() + sizeof(uhdr));
-  for (u64 addr : personalities)
-    *per++ = addr;
+  for (Symbol<E> *sym : personalities)
+    *per++ = sym->get_got_addr(ctx);
 
   // Write first level pages, LSDA and second level pages
   UnwindFirstLevelPage *page1 = (UnwindFirstLevelPage *)per;
@@ -2023,7 +1965,7 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records) 
   }
 
   // Write a terminator
-  UnwindRecord<E> &last = *records[records.size() - 1];
+  UnwindRecord<E> &last = *pages.back().back();
   page1->func_addr = last.subsec->get_addr(ctx) + last.subsec->input_size + 1;
   page1->page_offset = 0;
   page1->lsda_offset = (u8 *)lsda - buf.data();
@@ -2033,25 +1975,52 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E> *> records) 
   return buf;
 }
 
+// If two unwind records covers adjascent functions and have identical
+// contents (i.e. have the same encoding, the same personality function
+// and don't have LSDA), we can merge the two.
 template <typename E>
-u32 UnwindEncoder<E>::encode_personality(Context<E> &ctx, u64 addr) {
-  for (i64 i = 0; i < personalities.size(); i++)
-    if (personalities[i] == addr)
-      return (i + 1) << std::countr_zero((u32)UNWIND_PERSONALITY_MASK);
+static std::span<UnwindRecord<E> *>
+merge_unwind_records(Context<E> &ctx, std::vector<UnwindRecord<E> *> &records) {
+  auto can_merge = [&](UnwindRecord<E> &a, UnwindRecord<E> &b) {
+    // As a special case, we don't merge unwind records with STACK_IND
+    // encoding even if their encodings look the same. It is because the
+    // real encoding for that record type is encoded in the instruction
+    // stream and therefore the real encodings might be different.
+    if constexpr (is_x86<E>)
+      if ((a.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND ||
+          (b.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND)
+        return false;
 
-  if (personalities.size() == 3)
-    Fatal(ctx) << "too many personality functions";
+    return a.get_func_addr(ctx) + a.code_len == b.get_func_addr(ctx) &&
+           a.encoding == b.encoding &&
+           a.personality == b.personality &&
+           !a.lsda && !b.lsda;
+  };
 
-  personalities.push_back(addr);
-  return personalities.size() << std::countr_zero((u32)UNWIND_PERSONALITY_MASK);
+  assert(!records.empty());
+
+  i64 i = 0;
+  for (i64 j = 1; j < records.size(); j++) {
+    if (can_merge(*records[i], *records[j]))
+      records[i]->code_len += records[j]->code_len;
+    else
+      records[++i] = records[j];
+  }
+  return {&records[0], (size_t)(i + 1)};
 }
 
+// __unwind_info stores unwind records in two-level tables. The first-level
+// table specifies the upper 12 bits of function addresses. The second-level
+// page entries are 32-bits long and specifies the lower 24 bits of fucntion
+// addresses along with indices to personality functions.
+//
+// This function splits a vector of unwind records into groups so that
+// records in the same group share the first-level page table.
 template <typename E>
-std::vector<std::span<UnwindRecord<E> *>>
-UnwindEncoder<E>::split_records(Context<E> &ctx,
-                                std::span<UnwindRecord<E> *> records) {
+static std::vector<std::vector<UnwindRecord<E> *>>
+split_records(Context<E> &ctx, std::span<UnwindRecord<E> *> records) {
   constexpr i64 max_group_size = 200;
-  std::vector<std::span<UnwindRecord<E> *>> vec;
+  std::vector<std::vector<UnwindRecord<E> *>> vec;
 
   while (!records.empty()) {
     u64 end_addr = records[0]->get_func_addr(ctx) + (1 << 24);
@@ -2059,14 +2028,14 @@ UnwindEncoder<E>::split_records(Context<E> &ctx,
     while (i < records.size() && i < max_group_size &&
            records[i]->get_func_addr(ctx) < end_addr)
       i++;
-    vec.push_back(records.subspan(0, i));
+    vec.push_back({records.begin(), records.begin() + i});
     records = records.subspan(i);
   }
   return vec;
 }
 
 template <typename E>
-static std::vector<u8> construct_unwind_info(Context<E> &ctx) {
+void UnwindInfoSection<E>::compute_size(Context<E> &ctx) {
   std::vector<UnwindRecord<E> *> records;
 
   for (std::unique_ptr<OutputSegment<E>> &seg : ctx.segments)
@@ -2077,18 +2046,43 @@ static std::vector<u8> construct_unwind_info(Context<E> &ctx) {
             records.push_back(&rec);
 
   if (records.empty())
-    return {};
-  return UnwindEncoder<E>().encode(ctx, records);
-}
+    return;
 
-template <typename E>
-void UnwindInfoSection<E>::compute_size(Context<E> &ctx) {
-  this->hdr.size = construct_unwind_info(ctx).size();
+  auto encode_personality = [&](Symbol<E> *sym) -> u32 {
+    for (i64 i = 0; i < personalities.size(); i++)
+      if (personalities[i] == sym)
+        return (i + 1) << std::countr_zero((u32)UNWIND_PERSONALITY_MASK);
+
+    if (personalities.size() == 3)
+      Fatal(ctx) << "too many personality functions";
+
+    personalities.push_back(sym);
+    return personalities.size() << std::countr_zero((u32)UNWIND_PERSONALITY_MASK);
+  };
+
+  for (UnwindRecord<E> *rec : records) {
+    if (rec->personality)
+      rec->encoding |= encode_personality(rec->personality);
+    if (rec->lsda)
+      num_lsda++;
+  }
+
+  sort(records, [&](const UnwindRecord<E> *a, const UnwindRecord<E> *b) {
+    return a->get_func_addr(ctx) < b->get_func_addr(ctx);
+  });
+
+  std::span<UnwindRecord<E> *> records2 = merge_unwind_records(ctx, records);
+  pages = split_records(ctx, records2);
+
+  this->hdr.size = encode_unwind_info(ctx, personalities, pages, num_lsda).size();
 }
 
 template <typename E>
 void UnwindInfoSection<E>::copy_buf(Context<E> &ctx) {
-  std::vector<u8> vec = construct_unwind_info(ctx);
+  if (this->hdr.size == 0)
+    return;
+
+  std::vector<u8> vec = encode_unwind_info(ctx, personalities, pages, num_lsda);
   assert(this->hdr.size == vec.size());
   write_vector(ctx.buf + this->hdr.offset, vec);
 }
