@@ -443,7 +443,7 @@ void OutputSection<E>::compute_size(Context<E> &ctx) {
 
   // As a special case, we need a word-size padding at the beginning
   // of __data for dyld. It is located by __dyld_private symbol.
-  u64 offset = (this == ctx.data) ? 8 : 0;
+  u64 offset = (this == ctx.data) ? sizeof(Word<E>) : 0;
 
   for (Subsection<E> *subsec : members) {
     offset = align_to(offset, 1 << subsec->p2align);
@@ -2099,7 +2099,7 @@ void GotSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
 
 template <typename E>
 void GotSection<E>::copy_buf(Context<E> &ctx) {
-  u64 *buf = (u64 *)(ctx.buf + this->hdr.offset);
+  Word<E> *buf = (Word<E> *)(ctx.buf + this->hdr.offset);
 
   for (i64 i = 0; i < syms.size(); i++)
     if (!syms[i]->is_imported)
@@ -2111,7 +2111,7 @@ void GotSection<E>::copy_buf(Context<E> &ctx) {
 
 template <typename E>
 void LazySymbolPtrSection<E>::copy_buf(Context<E> &ctx) {
-  u64 *buf = (u64 *)(ctx.buf + this->hdr.offset);
+  Word<E> *buf = (Word<E> *)(ctx.buf + this->hdr.offset);
 
   for (i64 i = 0; i < ctx.stubs.syms.size(); i++)
     *buf++ = ctx.stub_helper->hdr.addr + E::stub_helper_hdr_size +
