@@ -1899,6 +1899,40 @@ public:
   std::vector<u64> personalities;
 };
 
+// If two unwind records covers adjascent functions and have identical
+// contents (i.e. have the same encoding, the same personality function
+// and don't have LSDA), we can merge the two.
+template <typename E>
+static void
+merge_unwind_records(Context<E> &ctx, std::span<UnwindRecord<E>> &records) {
+  auto can_merge = [&](UnwindRecord<E> &a, UnwindRecord<E> &b) {
+    // As a special case, we don't merge unwind records with STACK_IND
+    // encoding even if their encodings look the same. It is because the
+    // real encoding for that record type is encoded in the instruction
+    // stream and therefore the real encodings might be different.
+    if constexpr (is_x86<E>)
+      if ((a.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND ||
+          (b.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND)
+        return false;
+
+    return a.get_func_addr(ctx) + a.code_len == b.get_func_addr(ctx) &&
+           a.encoding == b.encoding &&
+           a.personality == b.personality &&
+           !a.lsda && !b.lsda;
+  };
+
+  assert(!records.empty());
+
+  i64 i = 0;
+  for (i64 j = 1; j < records.size(); j++) {
+    if (can_merge(records[i], records[j]))
+      records[i].code_len += records[j].code_len;
+    else
+      records[++i] = records[j];
+  }
+  records = records.subspan(0, i + 1);
+}
+
 template <typename E>
 std::vector<u8>
 UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
@@ -1915,6 +1949,7 @@ UnwindEncoder<E>::encode(Context<E> &ctx, std::span<UnwindRecord<E>> records) {
     return a.get_func_addr(ctx) < b.get_func_addr(ctx);
   });
 
+  merge_unwind_records(ctx, records);
   std::vector<std::span<UnwindRecord<E>>> pages = split_records(ctx, records);
 
   // Compute the size of the buffer.

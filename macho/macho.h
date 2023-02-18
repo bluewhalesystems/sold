@@ -726,6 +726,11 @@ enum : u32 {
   UNWIND_PERSONALITY_MASK = 0x30000000,
 };
 
+enum : u32 {
+  UNWIND_X86_64_MODE_MASK = 0x0f000000,
+  UNWIND_X86_64_MODE_STACK_IND = 0x03000000,
+};
+
 struct UnwindSectionHeader {
   ul32 version;
   ul32 encoding_offset;
