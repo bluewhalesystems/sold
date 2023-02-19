@@ -505,13 +505,15 @@ OutputSegment<E>::OutputSegment(std::string_view name) {
   memcpy(cmd.segname, name.data(), name.size());
 
   if (name == "__PAGEZERO")
-    cmd.initprot = cmd.maxprot = 0;
+    cmd.initprot = 0;
   else if (name == "__TEXT")
-    cmd.initprot = cmd.maxprot = VM_PROT_READ | VM_PROT_EXECUTE;
+    cmd.initprot = VM_PROT_READ | VM_PROT_EXECUTE;
   else if (name == "__LINKEDIT")
-    cmd.initprot = cmd.maxprot = VM_PROT_READ;
+    cmd.initprot = VM_PROT_READ;
   else
-    cmd.initprot = cmd.maxprot = VM_PROT_READ | VM_PROT_WRITE;
+    cmd.initprot = VM_PROT_READ | VM_PROT_WRITE;
+
+  cmd.maxprot = cmd.initprot;
 
   if (name == "__DATA_CONST")
     cmd.flags = SG_READ_ONLY;
@@ -1577,6 +1579,10 @@ bool operator<(const SymbolAddend<E> &a, const SymbolAddend<E> &b) {
   return a.addend < b.addend;
 }
 
+// A chained fixup can contain an addend if its value is equal to or
+// smaller than 255.
+static constexpr i64 MAX_INLINE_ADDEND = 255;
+
 template <typename E>
 static std::tuple<std::vector<SymbolAddend<E>>, u32>
 get_dynsyms(std::vector<Fixup<E>> &fixups) {
@@ -1584,15 +1590,14 @@ get_dynsyms(std::vector<Fixup<E>> &fixups) {
   std::vector<SymbolAddend<E>> syms;
   for (Fixup<E> &x : fixups)
     if (x.sym)
-      syms.push_back({x.sym, x.addend < 256 ? 0 : x.addend});
+      syms.push_back({x.sym, x.addend <= MAX_INLINE_ADDEND ? 0 : x.addend});
 
   sort(syms);
   remove_duplicates(syms);
 
   // Set symbol ordinal
-  for (i64 i = 0; i < syms.size(); i++)
-    if (i == 0 || syms[i - 1].sym != syms[i].sym)
-      syms[i].sym->fixup_ordinal = i;
+  for (i64 i = syms.size() - 1; i >= 0; i--)
+    syms[i].sym->fixup_ordinal = i;
 
   // Dynamic relocations can have an arbitrary large addend. For example,
   // if you initialize a global variable pointer as `int *p = foo + (1<<31)`
@@ -1837,7 +1842,7 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
 
         DyldChainedPtr64Bind *rec = (DyldChainedPtr64Bind *)loc;
 
-        if (fx[i].addend < 256) {
+        if (fx[i].addend <= MAX_INLINE_ADDEND) {
           rec->ordinal = sym->fixup_ordinal;
           rec->addend = fx[i].addend;
         } else {
