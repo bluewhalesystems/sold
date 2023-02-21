@@ -248,7 +248,8 @@ static void remove_unreferenced_subsections(Context<E> &ctx) {
     if (file == ctx.internal_obj)
       return;
 
-    if (!(((MachHeader *)file->mf->data)->flags & MH_SUBSECTIONS_VIA_SYMBOLS))
+    if (u32 flags = ((MachHeader *)file->mf->data)->flags;
+        !(flags & MH_SUBSECTIONS_VIA_SYMBOLS))
       return;
 
     for (i64 i = 0; i < file->mach_syms.size(); i++) {
@@ -258,9 +259,7 @@ static void remove_unreferenced_subsections(Context<E> &ctx) {
           (msym.desc & N_WEAK_DEF) && !(msym.desc & N_ALT_ENTRY))
         file->sym_to_subsec[i]->is_alive = false;
     }
-  });
 
-  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->subsections, [](Subsection<E> *subsec) {
       return !subsec->is_alive;
     });
