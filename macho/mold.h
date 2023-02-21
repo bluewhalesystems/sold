@@ -22,6 +22,7 @@ namespace mold::macho {
 
 template <typename E> class Chunk;
 template <typename E> class InputSection;
+template <typename E> class ObjectFile;
 template <typename E> class OutputSection;
 template <typename E> class Subsection;
 template <typename E> struct Context;
@@ -97,6 +98,41 @@ struct UnwindRecord {
 };
 
 template <typename E>
+struct CieRecord {
+  u64 get_addr(Context<E> &ctx) const {
+    return ctx.eh_frame.hdr.addr + output_offset;
+  }
+
+  void parse(Context<E> &ctx);
+  std::string_view get_contents() const;
+  i64 size() const { return get_contents().size(); }
+  void copy_to(Context<E> &ctx);
+
+  ObjectFile<E> *file = nullptr;
+  Symbol<E> *personality = nullptr;
+  u32 input_addr = 0;
+  u32 personality_offset = 0;
+  u32 output_offset = (u32)-1;
+  bool has_lsda = false;
+};
+
+template <typename E>
+struct FdeRecord {
+  u64 get_addr(Context<E> &ctx) const {
+    return ctx.eh_frame.hdr.addr + output_offset;
+  }
+
+  std::string_view get_contents(ObjectFile<E> &file) const;
+  i64 size(ObjectFile<E> &file) const { return get_contents(file).size(); }
+  Subsection<E> *get_cie(Context<E> &ctx, ObjectFile<E> &file);
+  void copy_to(Context<E> &ctx, ObjectFile<E> &file);
+
+  Subsection<E> *func = nullptr;
+  u32 input_addr = 0;
+  u32 output_offset = (u32)-1;
+};
+
+template <typename E>
 class InputFile {
 public:
   virtual ~InputFile() = default;
@@ -147,6 +183,8 @@ public:
   std::vector<std::string> get_linker_options(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   void parse_compact_unwind(Context<E> &ctx);
+  CieRecord<E> *find_cie(u32 input_addr);
+  void parse_eh_frame(Context<E> &ctx);
   void parse_mod_init_func(Context<E> &ctx);
   void resolve_symbols(Context<E> &ctx) override;
   void compute_symtab_size(Context<E> &ctx) override;
@@ -166,6 +204,9 @@ public:
   std::span<MachSym<E>> mach_syms;
   std::vector<Symbol<E>> local_syms;
   std::vector<UnwindRecord<E>> unwind_records;
+  std::vector<CieRecord<E>> cies;
+  std::vector<FdeRecord<E>> fdes;
+  MachSection<E> *eh_frame_sec = nullptr;
   ObjcImageInfo *objc_image_info = nullptr;
   LTOModule *lto_module = nullptr;
 
@@ -886,6 +927,18 @@ public:
 };
 
 template <typename E>
+class EhFrameSection : public Chunk<E> {
+public:
+  EhFrameSection(Context<E> &ctx)
+    : Chunk<E>(ctx, "__TEXT", "__eh_frame") {
+    this->hdr.p2align = sizeof(Word<E>);
+  }
+
+  void compute_size(Context<E> &ctx) override;
+  void copy_buf(Context<E> &ctx) override;
+};
+
+template <typename E>
 class SectCreateSection : public Chunk<E> {
 public:
   SectCreateSection(Context<E> &ctx, std::string_view seg, std::string_view sect,
@@ -1156,6 +1209,7 @@ struct Context {
   OutputMachHeader<E> mach_hdr{*this};
   StubsSection<E> stubs{*this};
   UnwindInfoSection<E> unwind_info{*this};
+  EhFrameSection<E> eh_frame{*this};
   GotSection<E> got{*this};
   ThreadPtrsSection<E> thread_ptrs{*this};
   ExportSection<E> export_{*this};

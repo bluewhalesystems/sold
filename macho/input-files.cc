@@ -95,6 +95,9 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
   if (unwind_sec)
     parse_compact_unwind(ctx);
 
+  if (eh_frame_sec)
+    parse_eh_frame(ctx);
+
   if (mod_init_func)
     parse_mod_init_func(ctx);
 }
@@ -114,6 +117,12 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
 
     if (msec.match("__LD", "__compact_unwind")) {
       unwind_sec = &msec;
+      continue;
+    }
+
+
+    if (msec.match("__TEXT", "__eh_frame")) {
+      eh_frame_sec = &msec;
       continue;
     }
 
@@ -146,7 +155,12 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
   }
 }
 
-static bool always_split(u32 ty) {
+template <typename E>
+static bool always_split(InputSection<E> &isec) {
+  if (isec.hdr.match("__TEXT", "__eh_frame"))
+    return true;
+
+  u32 ty = isec.hdr.type;
   return ty == S_4BYTE_LITERALS  || ty == S_8BYTE_LITERALS   ||
          ty == S_16BYTE_LITERALS || ty == S_LITERAL_POINTERS ||
          ty == S_CSTRING_LITERALS;
@@ -178,7 +192,7 @@ void ObjectFile<E>::split_subsections_via_symbols(Context<E> &ctx) {
   // Split each input section
   for (i64 i = 0; i < sections.size(); i++) {
     InputSection<E> *isec = sections[i].get();
-    if (!isec || always_split(isec->hdr.type))
+    if (!isec || always_split(*isec))
       continue;
 
     // We start with one big subsection and split it as we process symbols
@@ -233,7 +247,7 @@ void ObjectFile<E>::init_subsections(Context<E> &ctx) {
 
   for (i64 i = 0; i < sections.size(); i++) {
     InputSection<E> *isec = sections[i].get();
-    if (!isec || always_split(isec->hdr.type))
+    if (!isec || always_split(*isec))
       continue;
 
     Subsection<E> *subsec = new Subsection<E>{
@@ -573,7 +587,7 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
 
   for (i64 i = 0; i < num_entries; i++)
     if (!unwind_records[i].subsec)
-      Fatal(ctx) << *this << ": _compact_unwind: missing relocation at " << i;
+      Fatal(ctx) << *this << ": __compact_unwind: missing relocation at " << i;
 
   // Sort unwind entries by offset
   sort(unwind_records, [](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
@@ -591,6 +605,113 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
       j++;
     subsec.nunwind = j - i;
     i = j;
+  }
+}
+
+template <typename E>
+CieRecord<E> *ObjectFile<E>::find_cie(u32 input_addr) {
+  for (CieRecord<E> &cie : cies)
+    if (cie.input_addr <= input_addr && input_addr < cie.input_addr + cie.size())
+      return &cie;
+  return nullptr;
+}
+
+
+template <typename E>
+static void apply_eh_frame_relocs(Context<E> &ctx, ObjectFile<E> &file) {
+  MachSection<E> &msec = *file.eh_frame_sec;
+  u8 *buf = (u8 *)file.mf->get_contents().data() + msec.offset;
+  MachRel *mach_rels = (MachRel *)(file.mf->data + msec.reloff);
+
+  for (i64 i = 0; i < msec.nreloc; i++) {
+    MachRel &r1 = mach_rels[i];
+
+    switch (r1.type) {
+    case E::subtractor_rel: {
+      if (i + 1 == msec.nreloc)
+        Fatal(ctx) << file << ": __eh_frame: invalid subtractor reloc";
+
+      MachRel &r2 = mach_rels[++i];
+      if (r2.type != E::abs_rel)
+        Fatal(ctx) << file << ": __eh_frame: invalid subtractor reloc pair";
+
+      u32 target1 = r1.is_extern ? file.mach_syms[r1.idx].value : r1.idx;
+      u32 target2 = r2.is_extern ? file.mach_syms[r2.idx].value : r2.idx;
+
+      if (r1.p2size == 2)
+        *(ul32 *)(buf + r1.offset) += target2 - target1;
+      else if (r1.p2size == 3)
+        *(ul64 *)(buf + r1.offset) += (i32)(target2 - target1);
+      else
+        Fatal(ctx) << file << ": __eh_frame: invalid p2size";
+      break;
+    }
+    case E::gotpc_rel:
+      break;
+    default:
+      Fatal(ctx) << file << ": unknown relocation type";
+    }
+  }
+}
+
+template <typename E>
+void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
+  apply_eh_frame_relocs(ctx, *this);
+
+  const char *start = this->mf->get_contents().data() + eh_frame_sec->offset;
+  std::string_view data(start, eh_frame_sec->size);
+
+  // Split section contents into CIE and FDE records
+  while (!data.empty()) {
+    u32 len = *(ul32 *)data.data();
+    if (len == 0xffff'ffff)
+      Fatal(ctx) << *this
+                 << ": __eh_frame record with an extended length is not supported";
+
+    u32 offset = data.data() - start;
+
+    u32 id = *(ul32 *)(data.data() + 4);
+    if (id == 0) {
+      cies.push_back(CieRecord<E>{
+        .file = this,
+        .input_addr = (u32)(eh_frame_sec->addr + offset),
+      });
+      cies.back().parse(ctx);
+    } else {
+      u64 addr = *(il64 *)(data.data() + 8) + eh_frame_sec->addr + offset + 8;
+      Subsection<E> *func = find_subsection(ctx, addr);
+      if (!func)
+        Fatal(ctx) << *this << ": __unwind_info: FDE with invalid function"
+                   << " reference at 0x" << std::hex << offset;
+
+      fdes.push_back(FdeRecord<E>{
+        .func = func,
+        .input_addr = (u32)(eh_frame_sec->addr + offset),
+      });
+    }
+
+    data = data.substr(len + 4);
+  }
+
+  // Associate relocations to CIEs
+  MachRel *mach_rels = (MachRel *)(this->mf->data + eh_frame_sec->reloff);
+
+  for (i64 i = 0; i < eh_frame_sec->nreloc; i++) {
+    MachRel &r = mach_rels[i];
+    if (r.type != E::gotpc_rel)
+      continue;
+
+    if (r.p2size != 2)
+      Fatal(ctx) << *this << ": __eh_frame: unexpected p2size";
+    if (!r.is_extern)
+      Fatal(ctx) << *this << ": __eh_frame: unexpected is_extern value";
+
+    CieRecord<E> *cie = find_cie(eh_frame_sec->addr + r.offset);
+    if (!cie)
+      Fatal(ctx) << *this << ": __eh_frame: unexpected relocation offset";
+
+    cie->personality = this->syms[r.idx];
+    cie->personality_offset = eh_frame_sec->addr + r.offset - cie->input_addr;
   }
 }
 
