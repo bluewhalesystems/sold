@@ -2146,6 +2146,139 @@ void ThreadPtrsSection<E>::copy_buf(Context<E> &ctx) {
       buf[i] = sym.get_addr(ctx);
 }
 
+// Parse CIE augmented string
+template <typename E>
+void CieRecord<E>::parse(Context<E> &ctx) {
+  std::string_view aug = get_contents().data() + 9;
+
+  for (char c : aug) {
+    switch (c) {
+    case 'L':
+      has_lsda = true;
+      break;
+    case 'z':
+    case 'P':
+    case 'R':
+      break;
+    default:
+      Fatal(ctx) << *file << ": __eh_frame: unknown augmented string: " << aug;
+    }
+  }
+}
+
+template <typename E>
+std::string_view CieRecord<E>::get_contents() const {
+  const char *data = file->mf->get_contents().data() + file->eh_frame_sec->offset +
+                     input_addr - file->eh_frame_sec->addr;
+  return {data, (size_t)*(ul32 *)data + 4};
+}
+
+template <typename E>
+void CieRecord<E>::copy_to(Context<E> &ctx) {
+  u8 *buf = ctx.buf + ctx.eh_frame.hdr.offset;
+
+  std::string_view data = get_contents();
+  memcpy(buf + output_offset, data.data(), data.size());
+
+  if (personality) {
+    *(ul32 *)(buf + output_offset + personality_offset) =
+      personality->get_got_addr(ctx) - get_addr(ctx) - personality_offset;
+  }
+}
+
+template <typename E>
+std::string_view FdeRecord<E>::get_contents(ObjectFile<E> &file) const {
+  const char *data = file.mf->get_contents().data() + file.eh_frame_sec->offset +
+                     input_addr - file.eh_frame_sec->addr;
+  return {data, (size_t)*(ul32 *)data + 4};
+}
+
+template <typename E>
+void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
+  u8 *buf = ctx.buf + ctx.eh_frame.hdr.offset + output_offset;
+
+  // Copy FDE contents
+  std::string_view data = get_contents(file);
+  memcpy(buf, data.data(), data.size());
+
+  // Relocate CIE offset
+  auto find_cie = [&](i64 addr) {
+    for (CieRecord<E> &cie : file.cies)
+      if (cie.input_addr == addr)
+        return &cie;
+    Fatal(ctx) << file << ": cannot find a CIE for a FDE at address 0x"
+               << std::hex << input_addr;
+  };
+
+  i64 cie_offset = *(ul32 *)(data.data() + 4);
+  CieRecord<E> *cie = find_cie(input_addr + 4 - cie_offset);
+
+  *(ul32 *)(buf + 4) = output_offset + 4 - cie->output_offset;
+
+  // Relocate function start address
+  *(ul64 *)(buf + 8) = (i32)(func->get_addr(ctx) - get_addr(ctx) - 8);
+
+  if (cie->has_lsda) {
+    u8 *aug = buf + 24;
+    read_uleb(aug); // skip Augmentation Data Length
+
+    i64 offset = aug - buf;
+    u64 addr = *(ul32 *)aug + input_addr + offset;
+
+    Subsection<E> *lsda = file.find_subsection(ctx, addr);
+    if (!lsda)
+      Fatal(ctx) << file << ": cannot find a LSDA for a FDE at address 0x"
+                 << std::hex << input_addr;
+
+    *(ul32 *)aug = lsda->get_addr(ctx) - get_addr(ctx) - offset +
+                   addr - lsda->input_addr;
+  }
+}
+
+template <typename E>
+void EhFrameSection<E>::compute_size(Context<E> &ctx) {
+  // Remove FDEs pointing to dead functions or functions that already
+  // have compact unwind info.
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    std::erase_if(file->fdes, [](FdeRecord<E> &fde) {
+      return !fde.func->is_alive || fde.func->nunwind;
+    });
+  });
+
+  i64 offset = 0;
+
+  for (ObjectFile<E> *file : ctx.objs) {
+    if (file->fdes.empty())
+      continue;
+
+    for (CieRecord<E> &cie : file->cies) {
+      cie.output_offset = offset;
+      offset += cie.size();
+    }
+
+    for (FdeRecord<E> &fde : file->fdes) {
+      fde.output_offset = offset;
+      offset += fde.size(*file);
+    }
+  }
+
+  this->hdr.size = offset;
+}
+
+template <typename E>
+void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    if (file->fdes.empty())
+      return;
+
+    for (CieRecord<E> &cie : file->cies)
+      cie.copy_to(ctx);
+
+    for (FdeRecord<E> &fde : file->fdes)
+      fde.copy_to(ctx, *file);
+  });
+}
+
 template <typename E>
 SectCreateSection<E>::SectCreateSection(Context<E> &ctx, std::string_view seg,
                                         std::string_view sect,
@@ -2185,6 +2318,9 @@ template class UnwindInfoSection<E>;
 template class GotSection<E>;
 template class LazySymbolPtrSection<E>;
 template class ThreadPtrsSection<E>;
+template class CieRecord<E>;
+template class FdeRecord<E>;
+template class EhFrameSection<E>;
 template class SectCreateSection<E>;
 
 } // namespace mold::macho

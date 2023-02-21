@@ -923,6 +923,7 @@ struct ARM64 {
   static constexpr u32 page_size = 16384;
   static constexpr u32 abs_rel = ARM64_RELOC_UNSIGNED;
   static constexpr u32 subtractor_rel = ARM64_RELOC_SUBTRACTOR;
+  static constexpr u32 gotpc_rel = ARM64_RELOC_POINTER_TO_GOT;
   static constexpr u32 stub_size = 12;
   static constexpr u32 stub_helper_hdr_size = 24;
   static constexpr u32 stub_helper_size = 12;
@@ -934,6 +935,7 @@ struct ARM64_32 {
   static constexpr u32 page_size = 16384;
   static constexpr u32 abs_rel = ARM64_RELOC_UNSIGNED;
   static constexpr u32 subtractor_rel = ARM64_RELOC_SUBTRACTOR;
+  static constexpr u32 gotpc_rel = ARM64_RELOC_POINTER_TO_GOT;
   static constexpr u32 stub_size = 12;
   static constexpr u32 stub_helper_hdr_size = 24;
   static constexpr u32 stub_helper_size = 12;
@@ -945,6 +947,7 @@ struct X86_64 {
   static constexpr u32 page_size = 4096;
   static constexpr u32 abs_rel = X86_64_RELOC_UNSIGNED;
   static constexpr u32 subtractor_rel = X86_64_RELOC_SUBTRACTOR;
+  static constexpr u32 gotpc_rel = X86_64_RELOC_GOT;
   static constexpr u32 stub_size = 6;
   static constexpr u32 stub_helper_hdr_size = 16;
   static constexpr u32 stub_helper_size = 10;
