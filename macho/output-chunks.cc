@@ -2072,7 +2072,8 @@ void UnwindInfoSection<E>::compute_size(Context<E> &ctx) {
       num_lsda++;
   }
 
-  sort(records, [&](const UnwindRecord<E> *a, const UnwindRecord<E> *b) {
+  tbb::parallel_sort(records,
+                     [&](const UnwindRecord<E> *a, const UnwindRecord<E> *b) {
     return a->get_func_addr(ctx) < b->get_func_addr(ctx);
   });
 
