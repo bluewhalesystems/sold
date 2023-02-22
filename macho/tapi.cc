@@ -113,37 +113,43 @@ to_tbd(Context<E> &ctx, YamlNode &node, std::string_view arch,
   return tbd;
 }
 
+static std::vector<std::string_view> split_string(std::string_view str, i64 max) {
+  std::vector<std::string_view> vec;
+  while (vec.size() < max) {
+    size_t pos = str.find('$');
+    if (pos == str.npos) {
+      vec.push_back(str);
+      return vec;
+    }
+
+    vec.push_back(str.substr(0, pos));
+    str = str.substr(pos + 1);
+  }
+  return vec;
+}
+
 // Dylib can contain special symbols whose name starts with "$ld$".
 // Such symbols aren't actually symbols but linker directives.
 // We interpret such symbols in this function.
 template <typename E>
-static void interpret_ld_symbols(Context<E> &ctx, TextDylib &tbd) {
+static void
+interpret_ld_symbols(Context<E> &ctx, TextDylib &tbd, std::string_view filename) {
   std::set<std::string_view> syms;
   std::unordered_set<std::string_view> hidden_syms;
 
-  auto string_view = [](const std::csub_match &sub) {
-    return std::string_view{sub.first, (size_t)sub.length()};
-  };
-
-  for (std::string_view s : tbd.exports) {
-    if (!s.starts_with("$ld$"))
-      continue;
-
-    auto flags = std::regex_constants::ECMAScript | std::regex_constants::optimize;
-    std::cmatch m;
-
+  for (std::string_view str : tbd.exports) {
     // $ld$previous$ symbol replaces the default install name with a
     // specified one if the platform OS version is in a specified range.
-    static std::regex previous_re(
-      R"(\$ld\$previous\$([^$]+)\$([\d.]*)\$(\d+)\$([\d.]+)\$([\d.]+)\$(.*)\$)",
-      flags);
+    if (remove_prefix(str, "$ld$previous$")) {
+      std::vector<std::string_view> args = split_string(str, 7);
+      if (args.size() != 7)
+        Fatal(ctx) << filename << ": malformed symbol: $ld$previous$" << str;
 
-    if (std::regex_match(s.data(), s.data() + s.size(), m, previous_re)) {
-      std::string_view install_name = string_view(m[1]);
-      i64 platform = std::stoi(m[3].str());
-      VersionTriple min_version = parse_version(ctx, string_view(m[4]));
-      VersionTriple max_version = parse_version(ctx, string_view(m[5]));
-      std::string_view symbol_name = string_view(m[6]);
+      std::string_view install_name = args[0];
+      i64 platform = std::stoi(std::string(args[2]));
+      VersionTriple min_version = parse_version(ctx, args[3]);
+      VersionTriple max_version = parse_version(ctx, args[4]);
+      std::string_view symbol_name = args[5];
 
       if (!symbol_name.empty()) {
         // ld64 source seems to have implemented a feature to give an
@@ -163,39 +169,47 @@ static void interpret_ld_symbols(Context<E> &ctx, TextDylib &tbd) {
 
     // $ld$add$os_version$symbol adds a symbol if the given OS version
     // matches.
-    static std::regex add_re(R"(\$ld\$add\$os([\d.]+)\$(.+))", flags);
+    if (remove_prefix(str, "$ld$add$os")) {
+      std::vector<std::string_view> args = split_string(str, 2);
+      if (args.size() != 2)
+        Fatal(ctx) << filename << ": malformed symbol: $ld$add$os" << str;
 
-    if (std::regex_match(s.data(), s.data() + s.size(), m, add_re)) {
-      if (ctx.arg.platform_min_version == parse_version(ctx, string_view(m[1])))
-        syms.insert(string_view(m[2]));
+      VersionTriple version = parse_version(ctx, args[0]);
+      if (ctx.arg.platform_min_version == version)
+        syms.insert(args[1]);
       continue;
     }
 
     // $ld$hide$os_version$symbol hides a symbol if the given OS version
     // matches.
-    static std::regex hidden_re(R"(\$ld\$hide\$os([\d.]+)\$(.+))", flags);
+    if (remove_prefix(str, "$ld$hide$os")) {
+      std::vector<std::string_view> args = split_string(str, 2);
+      if (args.size() != 2)
+        Fatal(ctx) << filename << ": malformed symbol: $ld$hide$os" << str;
 
-    if (std::regex_match(s.data(), s.data() + s.size(), m, hidden_re)) {
-      if (ctx.arg.platform_min_version == parse_version(ctx, string_view(m[1])))
-        hidden_syms.insert(string_view(m[2]));
+      VersionTriple version = parse_version(ctx, args[0]);
+      if (ctx.arg.platform_min_version == version)
+        hidden_syms.insert(args[1]);
       continue;
     }
 
     // $ld$install_name$os_version$name changes the install name to a
     // given name.
-    static std::regex
-      install_name_re(R"(\$ld\$install_name\$os([\d.]+)\$(.+))", flags);
+    if (remove_prefix(str, "$ld$install_name$os")) {
+      std::vector<std::string_view> args = split_string(str, 2);
+      if (args.size() != 2)
+        Fatal(ctx) << filename << ": malformed symbol: $ld$install_name$os" << str;
 
-    if (std::regex_match(s.data(), s.data() + s.size(), m, install_name_re)) {
-      if (ctx.arg.platform_min_version == parse_version(ctx, string_view(m[1])))
-        tbd.install_name = string_view(m[2]);
+      VersionTriple version = parse_version(ctx, args[0]);
+      if (ctx.arg.platform_min_version == version)
+        tbd.install_name = args[1];
       continue;
     }
   }
 
-  for (std::string_view s : tbd.exports)
-    if (!s.starts_with("$ld$") && !hidden_syms.contains(s))
-      syms.insert(s);
+  for (std::string_view str : tbd.exports)
+    if (!str.starts_with("$ld$") && !hidden_syms.contains(str))
+      syms.insert(str);
 
   tbd.exports = std::move(syms);
 }
@@ -276,7 +290,7 @@ static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
       vec.push_back(*dylib);
 
   for (TextDylib &tbd : vec)
-    interpret_ld_symbols(ctx, tbd);
+    interpret_ld_symbols(ctx, tbd, mf->name);
 
   return squash(ctx, vec, arch);
 }
