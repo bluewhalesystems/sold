@@ -241,9 +241,23 @@ squash(Context<E> &ctx, std::span<TextDylib> tbds, std::string_view arch) {
 }
 
 template <typename E>
+static std::string_view replace_crlf(Context<E> &ctx, std::string_view str) {
+  if (str.find('\r') == str.npos)
+    return str;
+
+  std::string buf;
+  for (char c : str)
+    if (c != '\r')
+      buf += c;
+  return save_string(ctx, buf);
+}
+
+template <typename E>
 static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
                        std::string_view arch) {
   std::string_view contents = mf->get_contents();
+  contents = replace_crlf(ctx, contents);
+
   std::variant<std::vector<YamlNode>, YamlError> res = parse_yaml(contents);
 
   if (YamlError *err = std::get_if<YamlError>(&res)) {
