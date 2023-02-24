@@ -1439,7 +1439,8 @@ void CodeSignatureSection<E>::write_signature(Context<E> &ctx) {
 #if __APPLE__
     // Calling msync() with MS_ASYNC speeds up the following msync()
     // with MS_INVALIDATE.
-    msync(ctx.buf + i * E::page_size, 1024 * E::page_size, MS_ASYNC);
+    if (ctx.output_file->is_mmapped)
+      msync(ctx.buf + i * E::page_size, 1024 * E::page_size, MS_ASYNC);
 #endif
   }
 
@@ -1473,8 +1474,10 @@ void CodeSignatureSection<E>::write_signature(Context<E> &ctx) {
   // mmapped pages.
   //
   // https://openradar.appspot.com/FB8914231
-  Timer t2(ctx, "msync", &t);
-  msync(ctx.buf, ctx.output_file->filesize, MS_INVALIDATE);
+  if (ctx.output_file->is_mmapped) {
+    Timer t2(ctx, "msync", &t);
+    msync(ctx.buf, ctx.output_file->filesize, MS_INVALIDATE);
+  }
 #endif
 }
 
