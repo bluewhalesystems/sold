@@ -136,6 +136,9 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
       continue;
     }
 
+    if (msec.match("__DWARF", "__debug_info"))
+      has_debug_info = true;
+
     if (msec.attr & S_ATTR_DEBUG)
       continue;
 
@@ -1030,7 +1033,9 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
   // and read debug info from object files.
   //
   // Debug symbols are called "stab" symbols.
-  if (!ctx.arg.S && this != ctx.internal_obj) {
+  bool emit_debug_syms = has_debug_info && !ctx.arg.S;
+
+  if (emit_debug_syms) {
     this->oso_name = get_oso_name();
     if (!ctx.arg.oso_prefix.empty() &&
         this->oso_name.starts_with(ctx.arg.oso_prefix))
@@ -1060,7 +1065,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
     else
       this->num_locals++;
 
-    if (!ctx.arg.S && sym->subsec)
+    if (emit_debug_syms && sym->subsec)
       this->num_stabs += sym->subsec->isec->hdr.is_text() ? 2 : 1;
 
     this->strtab_size += sym->name.size() + 1;
@@ -1105,7 +1110,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   //
   // At the end of stab symbols, we have a N_SO symbol without symbol name
   // as an end marker.
-  if (!ctx.arg.S && this != ctx.internal_obj) {
+  if (has_debug_info && !ctx.arg.S) {
     MachSym<E> *stab = buf + this->stabs_offset;
     i64 stab_idx = 2;
 

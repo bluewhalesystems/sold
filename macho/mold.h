@@ -197,6 +197,7 @@ private:
   MachSection<E> *unwind_sec = nullptr;
   std::unique_ptr<MachSection<E>> common_hdr;
   InputSection<E> *common_sec = nullptr;
+  bool has_debug_info = false;
 
   std::vector<std::unique_ptr<Subsection<E>>> subsec_pool;
   std::vector<std::unique_ptr<MachSection<E>>> mach_sec_pool;
