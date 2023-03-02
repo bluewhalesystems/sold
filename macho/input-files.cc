@@ -526,16 +526,16 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
     switch (r.offset % sizeof(CompactUnwindEntry<E>)) {
     case offsetof(CompactUnwindEntry<E>, code_start): {
       Subsection<E> *target;
-      if (r.is_extern)
-        target = sym_to_subsec[r.idx];
-      else
-        target = find_subsection(ctx, src[idx].code_start);
+      if (r.is_extern) {
+        dst.subsec = sym_to_subsec[r.idx];
+        dst.offset = src[idx].code_start;
+      } else {
+        dst.subsec = find_subsection(ctx, src[idx].code_start);
+        dst.offset = dst.subsec->input_addr - src[idx].code_start;
+      }
 
-      if (!target)
+      if (!dst.subsec)
         error();
-
-      dst.subsec = target;
-      dst.offset = target->input_addr - src[idx].code_start;
       break;
     }
     case offsetof(CompactUnwindEntry<E>, personality):

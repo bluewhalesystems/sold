@@ -1940,8 +1940,9 @@ encode_unwind_info(Context<E> &ctx, std::vector<Symbol<E> *> personalities,
 
     for (UnwindRecord<E> *rec : span) {
       if (rec->lsda) {
-        lsda->func_addr = rec->get_func_addr(ctx);
-        lsda->lsda_addr = rec->lsda->get_addr(ctx) + rec->lsda_offset;
+        lsda->func_addr = rec->get_func_addr(ctx) - ctx.mach_hdr.hdr.addr;
+        lsda->lsda_addr = rec->lsda->get_addr(ctx) + rec->lsda_offset -
+                          ctx.mach_hdr.hdr.addr;
         lsda++;
       }
     }
