@@ -608,15 +608,18 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
   }
 }
 
-template <typename E>
-CieRecord<E> *ObjectFile<E>::find_cie(u32 input_addr) {
-  for (CieRecord<E> &cie : cies)
-    if (cie.input_addr <= input_addr && input_addr < cie.input_addr + cie.size())
-      return &cie;
-  return nullptr;
-}
-
-
+// __eh_frame contains variable-sized records called CIE and FDE.
+// In an __eh_frame section, there's usually one CIE record followed
+// by as many FDE records as the number of functions defined by the
+// same input file.
+//
+// A CIE usually contains one PC-relative GOT-referencing relocation.
+// FDE usually contains no relocations. However, object files created
+// by `ld -r` contains many relocations for __eh_frame.
+//
+// This function applies relocations against __eh_frame input sections
+// so that all __eh_frame contains only one relocation for an CIE and
+// no relocation for FDEs.
 template <typename E>
 static void apply_eh_frame_relocs(Context<E> &ctx, ObjectFile<E> &file) {
   MachSection<E> &msec = *file.eh_frame_sec;
@@ -696,6 +699,13 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
   // Associate relocations to CIEs
   MachRel *mach_rels = (MachRel *)(this->mf->data + eh_frame_sec->reloff);
 
+  auto find_cie = [&](u32 input_addr) -> CieRecord<E> * {
+    for (CieRecord<E> &cie : cies)
+      if (cie.input_addr <= input_addr && input_addr < cie.input_addr + cie.size())
+        return &cie;
+    Fatal(ctx) << *this << ": __eh_frame: unexpected relocation offset";
+  };
+
   for (i64 i = 0; i < eh_frame_sec->nreloc; i++) {
     MachRel &r = mach_rels[i];
     if (r.type != E::gotpc_rel)
@@ -707,9 +717,6 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
       Fatal(ctx) << *this << ": __eh_frame: unexpected is_extern value";
 
     CieRecord<E> *cie = find_cie(eh_frame_sec->addr + r.offset);
-    if (!cie)
-      Fatal(ctx) << *this << ": __eh_frame: unexpected relocation offset";
-
     cie->personality = this->syms[r.idx];
     cie->personality_offset = eh_frame_sec->addr + r.offset - cie->input_addr;
   }

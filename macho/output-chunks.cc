@@ -2181,8 +2181,9 @@ void CieRecord<E>::copy_to(Context<E> &ctx) {
   memcpy(buf + output_offset, data.data(), data.size());
 
   if (personality) {
-    *(ul32 *)(buf + output_offset + personality_offset) =
-      personality->get_got_addr(ctx) - get_addr(ctx) - personality_offset;
+    i64 offset = output_offset + personality_offset;
+    *(ul32 *)(buf + offset) =
+      personality->get_got_addr(ctx) - (ctx.eh_frame.hdr.addr + offset);
   }
 }
 
@@ -2216,7 +2217,8 @@ void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
   *(ul32 *)(buf + 4) = output_offset + 4 - cie->output_offset;
 
   // Relocate function start address
-  *(ul64 *)(buf + 8) = (i32)(func->get_addr(ctx) - get_addr(ctx) - 8);
+  u64 output_addr = ctx.eh_frame.hdr.addr + output_offset;
+  *(ul64 *)(buf + 8) = (i32)(func->get_addr(ctx) - output_addr - 8);
 
   if (cie->has_lsda) {
     u8 *aug = buf + 24;
@@ -2230,7 +2232,7 @@ void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
       Fatal(ctx) << file << ": cannot find a LSDA for a FDE at address 0x"
                  << std::hex << input_addr;
 
-    *(ul32 *)aug = lsda->get_addr(ctx) - get_addr(ctx) - offset +
+    *(ul32 *)aug = lsda->get_addr(ctx) - output_addr - offset +
                    addr - lsda->input_addr;
   }
 }

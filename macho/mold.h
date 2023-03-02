@@ -99,10 +99,6 @@ struct UnwindRecord {
 
 template <typename E>
 struct CieRecord {
-  u64 get_addr(Context<E> &ctx) const {
-    return ctx.eh_frame.hdr.addr + output_offset;
-  }
-
   void parse(Context<E> &ctx);
   std::string_view get_contents() const;
   i64 size() const { return get_contents().size(); }
@@ -118,10 +114,6 @@ struct CieRecord {
 
 template <typename E>
 struct FdeRecord {
-  u64 get_addr(Context<E> &ctx) const {
-    return ctx.eh_frame.hdr.addr + output_offset;
-  }
-
   std::string_view get_contents(ObjectFile<E> &file) const;
   i64 size(ObjectFile<E> &file) const { return get_contents(file).size(); }
   Subsection<E> *get_cie(Context<E> &ctx, ObjectFile<E> &file);
@@ -183,7 +175,6 @@ public:
   std::vector<std::string> get_linker_options(Context<E> &ctx);
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   void parse_compact_unwind(Context<E> &ctx);
-  CieRecord<E> *find_cie(u32 input_addr);
   void parse_eh_frame(Context<E> &ctx);
   void parse_mod_init_func(Context<E> &ctx);
   void resolve_symbols(Context<E> &ctx) override;
