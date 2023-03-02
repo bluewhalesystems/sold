@@ -136,7 +136,7 @@ static void compute_import_export(Context<E> &ctx) {
       }
 
       // If we are using a dylib symbol, we need to import it.
-      if (sym->file != file && sym->file->is_dylib) {
+      if (sym->file && sym->file->is_dylib) {
         std::scoped_lock lock(sym->mu);
         sym->is_imported = true;
       }

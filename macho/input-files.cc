@@ -148,7 +148,7 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
     if (msec.match("__DWARF", "__debug_info"))
       has_debug_info = true;
 
-    if (msec.attr & S_ATTR_DEBUG)
+    if (msec.get_segname() == "__LLVM" || (msec.attr & S_ATTR_DEBUG))
       continue;
 
     sections[i].reset(new InputSection<E>(ctx, *this, msec, i));
@@ -800,7 +800,13 @@ template <typename E>
 void ObjectFile<E>::resolve_symbols(Context<E> &ctx) {
   for (i64 i = 0; i < this->syms.size(); i++) {
     MachSym<E> &msym = mach_syms[i];
+
     if (!msym.is_extern || msym.is_undef())
+      continue;
+
+    // Global symbols in a discarded segment (i.e. __LLVM segment) are
+    // silently ignored.
+    if (msym.type == N_SECT && !sym_to_subsec[i])
       continue;
 
     Symbol<E> &sym = *this->syms[i];
