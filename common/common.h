@@ -159,7 +159,7 @@ private:
 template <typename Context>
 class Error {
 public:
-  Error(Context &ctx) : out(ctx, std::cerr) {
+  Error(Context &ctx) : out(ctx, std::cerr), suppress(ctx.arg.suppress_warnings) {
     if (ctx.arg.noinhibit_exec) {
       out << add_color(ctx, "warning");
     } else {
@@ -169,12 +169,14 @@ public:
   }
 
   template <class T> Error &operator<<(T &&val) {
-    out << std::forward<T>(val);
+    if (!suppress)
+      out << std::forward<T>(val);
     return *this;
   }
 
 private:
   SyncOut<Context> out;
+  bool suppress;
 };
 
 template <typename Context>
@@ -220,23 +222,14 @@ struct Atomic : std::atomic<T> {
   void operator=(T val) { store(val); }
   operator T() const { return load(); }
 
-  void store(T val, std::memory_order order = relaxed) {
-    std::atomic<T>::store(val, order);
-  }
-
-  T load(std::memory_order order = relaxed) const {
-    return std::atomic<T>::load(order);
-  }
-
-  T exchange(T val, std::memory_order order = relaxed) {
-    return std::atomic<T>::exchange(val, order);
-  }
-
-  T fetch_or(T val, std::memory_order order = relaxed) {
-    return std::atomic<T>::fetch_or(val, order);
-  }
-
+  void store(T val) { std::atomic<T>::store(val, relaxed); }
+  T load() const { return std::atomic<T>::load(relaxed); }
+  T exchange(T val) { return std::atomic<T>::exchange(val, relaxed); }
   T operator|=(T val) { return std::atomic<T>::fetch_or(val, relaxed); }
+  T operator++() { return std::atomic<T>::fetch_add(1, relaxed) + 1; }
+  T operator--() { return std::atomic<T>::fetch_sub(1, relaxed) - 1; }
+  T operator++(int) { return std::atomic<T>::fetch_add(1, relaxed); }
+  T operator--(int) { return std::atomic<T>::fetch_sub(1, relaxed); }
 
   bool test_and_set() {
     // A relaxed load + branch (assuming miss) takes only around 20 cycles,

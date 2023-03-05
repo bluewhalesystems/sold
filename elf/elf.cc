@@ -403,6 +403,7 @@ std::string rel_to_string<RV64LE>(u32 r_type) {
   case R_RISCV_SET32: return "R_RISCV_SET32";
   case R_RISCV_32_PCREL: return "R_RISCV_32_PCREL";
   case R_RISCV_IRELATIVE: return "R_RISCV_IRELATIVE";
+  case R_RISCV_PLT32: return "R_RISCV_PLT32";
   }
   return "unknown (" + std::to_string(r_type) + ")";
 }
@@ -602,9 +603,13 @@ std::string rel_to_string<PPC64V1>(u32 r_type) {
   case R_PPC64_REL24_NOTOC: return "R_PPC64_REL24_NOTOC";
   case R_PPC64_PLTSEQ: return "R_PPC64_PLTSEQ";
   case R_PPC64_PLTCALL: return "R_PPC64_PLTCALL";
+  case R_PPC64_PLTSEQ_NOTOC: return "R_PPC64_PLTSEQ_NOTOC";
+  case R_PPC64_PLTCALL_NOTOC: return "R_PPC64_PLTCALL_NOTOC";
   case R_PPC64_PCREL_OPT: return "R_PPC64_PCREL_OPT";
   case R_PPC64_PCREL34: return "R_PPC64_PCREL34";
   case R_PPC64_GOT_PCREL34: return "R_PPC64_GOT_PCREL34";
+  case R_PPC64_PLT_PCREL34: return "R_PPC64_PLT_PCREL34";
+  case R_PPC64_PLT_PCREL34_NOTOC: return "R_PPC64_PLT_PCREL34_NOTOC";
   case R_PPC64_TPREL34: return "R_PPC64_TPREL34";
   case R_PPC64_DTPREL34: return "R_PPC64_DTPREL34";
   case R_PPC64_GOT_TLSGD_PCREL34: return "R_PPC64_GOT_TLSGD_PCREL34";

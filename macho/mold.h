@@ -1115,6 +1115,7 @@ struct Context {
     bool quick_exit = true;
     bool search_paths_first = true;
     bool stats = false;
+    bool suppress_warnings = false;
     bool trace = false;
     bool undefined_error = true;
     bool x = false;

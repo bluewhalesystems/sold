@@ -1584,6 +1584,7 @@ template <> struct ContextExtras<PPC64V1> {
 
 template <> struct ContextExtras<PPC64V2> {
   Symbol<PPC64V2> *TOC = nullptr;
+  Atomic<bool> is_power10 = false;
 };
 
 template <> struct ContextExtras<SPARC64> {
@@ -1622,11 +1623,11 @@ struct Context {
     bool Bsymbolic = false;
     bool Bsymbolic_functions = false;
     bool allow_multiple_definition = false;
+    bool apply_dynamic_relocs = true;
     bool color_diagnostics = false;
     bool default_symver = false;
     bool demangle = true;
     bool discard_all = false;
-    bool apply_dynamic_relocs = true;
     bool discard_locals = false;
     bool eh_frame_hdr = true;
     bool emit_relocs = false;
@@ -1666,6 +1667,7 @@ struct Context {
     bool stats = false;
     bool strip_all = false;
     bool strip_debug = false;
+    bool suppress_warnings = false;
     bool trace = false;
     bool undefined_version = false;
     bool warn_common = false;
@@ -1987,7 +1989,6 @@ public:
   i64 get_output_sym_idx(Context<E> &ctx) const;
   const ElfSym<E> &esym() const;
   void add_aux(Context<E> &ctx);
-  void clear();
 
   // A symbol is owned by a file. If two or more files define the
   // same symbol, the one with the strongest definition owns the symbol.
@@ -2785,18 +2786,6 @@ inline void Symbol<E>::add_aux(Context<E> &ctx) {
     aux_idx = sz;
     ctx.symbol_aux.resize(sz + 1);
   }
-}
-
-template <typename E>
-inline void Symbol<E>::clear() {
-  file = nullptr;
-  origin = 0;
-  value = -1;
-  sym_idx = -1;
-  ver_idx = 0;
-  is_weak = false;
-  is_imported = false;
-  is_exported = false;
 }
 
 inline bool is_c_identifier(std::string_view s) {
