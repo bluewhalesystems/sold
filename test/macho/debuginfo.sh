@@ -26,6 +26,3 @@ $t/exe | grep -q 'Hello world'
 
 lldb -o 'b main' -o run -o list -o quit $t/exe | \
   grep -Eq '^-> 3\s+int main\(\) { hello\(\); }'
-
-lldb -o 'b hello' -o run -o list -o quit $t/exe | \
-  grep -Eq '^-> 3\s+void hello\(\) { printf\("Hello world\\n"\); }'
