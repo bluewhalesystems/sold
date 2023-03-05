@@ -141,8 +141,8 @@ interpret_ld_symbols(Context<E> &ctx, TextDylib &tbd, std::string_view filename)
     // $ld$previous$ symbol replaces the default install name with a
     // specified one if the platform OS version is in a specified range.
     if (remove_prefix(str, "$ld$previous$")) {
-      std::vector<std::string_view> args = split_string(str, 7);
-      if (args.size() != 7)
+      std::vector<std::string_view> args = split_string(str, 6);
+      if (args.size() != 6)
         Fatal(ctx) << filename << ": malformed symbol: $ld$previous$" << str;
 
       std::string_view install_name = args[0];
