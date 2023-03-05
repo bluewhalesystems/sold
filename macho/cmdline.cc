@@ -119,6 +119,7 @@ Options:
   -unexported_symbols_list <FILE>
                               Read a list of unexported symbols from a given file
   -v                          Report version information
+  -w                          Suppress all warning messages
   -weak_framework <NAME>[,<SUFFIX>]
                               Search for a given framework
   -weak-l<LIB>                Search for a given library
@@ -547,6 +548,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_flag("-v")) {
       SyncOut(ctx) << mold_version;
       version_shown = true;
+    } else if (read_arg("-w")) {
+      ctx.arg.suppress_warnings = true;
     } else if (read_arg("-weak_framework")) {
       remaining.push_back("-weak_framework");
       remaining.push_back(std::string(arg));
