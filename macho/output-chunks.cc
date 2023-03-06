@@ -1816,7 +1816,7 @@ template <typename E>
 void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
   Timer t(ctx, "write_fixup_chains");
 
-  auto page = [](u64 addr) { return addr & ~(u64)(E::page_size - 1); };
+  auto page = [](u64 addr) { return addr & ~((u64)E::page_size - 1); };
 
   auto get_ordinal = [&](i64 i, u64 addend) {
     for (; i < dynsyms.size(); i++)
@@ -1863,7 +1863,7 @@ void ChainedFixupsSection<E>::write_fixup_chains(Context<E> &ctx) {
                      << "re-link with -no_fixup_chains";
 
         u64 val = *(ul64 *)loc;
-        if ((val & 0xff00'000f'ffff'ffff) != val)
+        if (val & 0x00ff'fff0'0000'0000)
           Error(ctx) << seg->cmd.get_segname()
                      << ": rebase addend too large; re-link with -no_fixup_chains";
 
@@ -2104,7 +2104,7 @@ void GotSection<E>::add(Context<E> &ctx, Symbol<E> *sym) {
 
   sym->got_idx = syms.size();
   syms.push_back(sym);
-  this->hdr.size = (syms.size() + subsections.size()) * sizeof(Word<E>);
+  this->hdr.size = syms.size() * sizeof(Word<E>);
 }
 
 template <typename E>
@@ -2114,9 +2114,6 @@ void GotSection<E>::copy_buf(Context<E> &ctx) {
   for (i64 i = 0; i < syms.size(); i++)
     if (!syms[i]->is_imported)
       buf[i] = syms[i]->get_addr(ctx);
-
-  for (i64 i = 0; i < subsections.size(); i++)
-    buf[i + syms.size()] = subsections[i]->get_addr(ctx);
 }
 
 template <typename E>

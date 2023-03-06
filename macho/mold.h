@@ -887,7 +887,6 @@ public:
   void copy_buf(Context<E> &ctx) override;
 
   std::vector<Symbol<E> *> syms;
-  std::vector<Subsection<E> *> subsections;
 };
 
 template <typename E>
