@@ -25,8 +25,8 @@ int foo();
 int main() { foo(); }
 EOF
 
-$CC -o $t/exe1 $t/b.o $t/a.tbd >& $t/log1
+$CC --ld-path=./ld64 -o $t/exe1 $t/b.o $t/a.tbd >& $t/log1
 ! grep -q 'application extension' $t/log1 || false
 
-$CC -o $t/exe1 $t/b.o $t/a.tbd -Wl,-application_extension >& $t/log2
+$CC --ld-path=./ld64 -o $t/exe1 $t/b.o $t/a.tbd -Wl,-application_extension >& $t/log2
 grep -q 'application extension' $t/log2

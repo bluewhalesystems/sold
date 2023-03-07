@@ -396,6 +396,9 @@ void OutputMachHeader<E>::copy_buf(Context<E> &ctx) {
   if (ctx.arg.mark_dead_strippable_dylib)
     mhdr.flags |= MH_DEAD_STRIPPABLE_DYLIB;
 
+  if (ctx.arg.application_extension)
+    mhdr.flags |= MH_APP_EXTENSION_SAFE;
+
   write_vector(buf + sizeof(mhdr), flatten(cmds));
 }
 

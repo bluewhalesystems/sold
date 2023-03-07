@@ -12,11 +12,6 @@ void bar() {}
 EOF
 
 $CC --ld-path=./ld64 -shared -o $t/d.so $t/b.so $t/c.o \
-  -Wl,-application_extension >& $t/log1
+  -Wl,-application_extension >& $t/log
 
-grep -q warning $t/log1
-
-$CC --ld-path=./ld64 -shared -o $t/d.so $t/b.so $t/c.o \
-  -Wl,-application_extension -Wl,-w >& $t/log2
-
-! grep -q warning $t/log2 || false
+grep -q 'not safe for use in application extensions' $t/log

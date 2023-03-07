@@ -548,7 +548,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_flag("-v")) {
       SyncOut(ctx) << mold_version;
       version_shown = true;
-    } else if (read_arg("-w")) {
+    } else if (read_flag("-w")) {
       ctx.arg.suppress_warnings = true;
     } else if (read_arg("-weak_framework")) {
       remaining.push_back("-weak_framework");
