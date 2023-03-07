@@ -194,14 +194,12 @@ public:
   }
 
   template <class T> Warn &operator<<(T &&val) {
-    if (!suppress)
-      out << std::forward<T>(val);
+    out << std::forward<T>(val);
     return *this;
   }
 
 private:
   SyncOut<Context> out;
-  bool suppress;
 };
 
 //
