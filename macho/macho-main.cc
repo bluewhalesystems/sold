@@ -1158,6 +1158,42 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
 }
 
 template <typename E>
+void print_dependencies(Context<E> &ctx) {
+  SyncOut(ctx) <<
+R"(# This is an output of the sold linker's --print-dependencies option.
+#
+# Each line consists of 4 fields, <file1>, <file2>, <symbol-type> and
+# <symbol>, separated by tab characters. It indicates that <file1> depends
+# on <file2> to use <symbol>. <symbol-type> is either "u" or "w" for
+# regular undefined or weak undefined, respectively.
+)";
+
+  for (ObjectFile<E> *file : ctx.objs) {
+    for (std::unique_ptr<InputSection<E>> &isec : file->sections) {
+      if (!isec)
+        continue;
+
+      MachRel *mach_rels = (MachRel *)(file->mf->data + isec->hdr.reloff);
+      std::unordered_set<Symbol<E> *> visited;
+
+      for (i64 i = 0; i < isec->hdr.nreloc; i++) {
+        MachRel &r = mach_rels[i];
+        if (!r.is_extern)
+          continue;
+
+        MachSym<E> &msym = file->mach_syms[r.idx];
+        Symbol<E> &sym = *file->syms[r.idx];
+
+        if (msym.is_undef() && sym.file && sym.file != file && visited.insert(&sym).second)
+          SyncOut(ctx) << *file << '\t' << *sym.file
+                       << '\t' << ((msym.desc & N_WEAK_DEF) ? 'w' : 'u')
+                       << '\t' << sym;
+      }
+    }
+  }
+}
+
+template <typename E>
 static void write_dependency_info(Context<E> &ctx) {
   static constexpr u8 LINKER_VERSION = 0;
   static constexpr u8 INPUT_FILE = 0x10;
@@ -1278,6 +1314,9 @@ int macho_main(int argc, char **argv) {
     dead_strip(ctx);
   else
     remove_unreferenced_subsections(ctx);
+
+  if (ctx.arg.print_dependencies)
+    print_dependencies(ctx);
 
   create_synthetic_chunks(ctx);
   merge_mergeable_sections(ctx);

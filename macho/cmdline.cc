@@ -15,6 +15,9 @@
 namespace mold::macho {
 
 static const char helpmsg[] = R"(
+Sold-specific options:
+  --print-dependencies        Print input file dependency information
+
 Options:
   -F<PATH>                    Add DIR to framework search path
   -L<PATH>                    Add DIR to library search path
@@ -329,7 +332,9 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       exit(0);
     }
 
-    if (read_joined("-F")) {
+    if (read_flag("--print-dependencies")) {
+      ctx.arg.print_dependencies = true;
+    } else if (read_joined("-F")) {
       framework_paths.push_back(std::string(arg));
     } else if (read_joined("-L")) {
       library_paths.push_back(std::string(arg));

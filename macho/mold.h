@@ -1111,6 +1111,7 @@ struct Context {
     bool mark_dead_strippable_dylib = false;
     bool noinhibit_exec = false;
     bool perf = false;
+    bool print_dependencies = false;
     bool quick_exit = true;
     bool search_paths_first = true;
     bool stats = false;
