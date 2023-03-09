@@ -509,8 +509,12 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
     (CompactUnwindEntry<E> *)(this->mf->data + hdr.offset);
 
   // Read compact unwind entries
-  for (i64 i = 0; i < num_entries; i++)
-    unwind_records.emplace_back(src[i].code_len, src[i].encoding);
+  for (i64 i = 0; i < num_entries; i++) {
+    unwind_records.push_back(UnwindRecord<E>{
+      .code_len = src[i].code_len,
+      .encoding = src[i].encoding,
+    });
+  }
 
   auto find_symbol = [&](u32 addr) -> Symbol<E> * {
     for (i64 i = 0; i < mach_syms.size(); i++)
@@ -542,10 +546,10 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
       Subsection<E> *target;
       if (r.is_extern) {
         dst.subsec = sym_to_subsec[r.idx];
-        dst.offset = src[idx].code_start;
+        dst.input_offset = src[idx].code_start;
       } else {
         dst.subsec = find_subsection(ctx, src[idx].code_start);
-        dst.offset = dst.subsec->input_addr - src[idx].code_start;
+        dst.input_offset = dst.subsec->input_addr - src[idx].code_start;
       }
 
       if (!dst.subsec)
@@ -591,8 +595,8 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
 
   // Sort unwind entries by offset
   sort(unwind_records, [](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
-    return std::tuple(a.subsec->input_addr, a.offset) <
-           std::tuple(b.subsec->input_addr, b.offset);
+    return std::tuple(a.subsec->input_addr, a.input_offset) <
+           std::tuple(b.subsec->input_addr, b.input_offset);
   });
 
   // Associate unwind entries to subsections

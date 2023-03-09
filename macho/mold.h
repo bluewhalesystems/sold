@@ -82,16 +82,14 @@ std::ostream &operator<<(std::ostream &out, const Relocation<E> &rel) {
 // instruction pointer.
 template <typename E>
 struct UnwindRecord {
-  UnwindRecord(u32 len, u32 enc) : code_len(len), encoding(enc) {}
-
   u64 get_func_addr(Context<E> &ctx) const {
-    return subsec->get_addr(ctx) + offset;
+    return subsec->get_addr(ctx) + input_offset;
   }
 
   Subsection<E> *subsec = nullptr;
   Symbol<E> *personality = nullptr;
   Subsection<E> *lsda = nullptr;
-  u32 offset = 0;
+  u32 input_offset = 0;
   u32 code_len = 0;
   u32 encoding = 0;
   u32 lsda_offset = 0;
