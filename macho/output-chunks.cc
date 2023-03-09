@@ -1999,8 +1999,8 @@ merge_unwind_records(Context<E> &ctx, std::vector<UnwindRecord<E> *> &records) {
     // real encoding for that record type is encoded in the instruction
     // stream and therefore the real encodings might be different.
     if constexpr (is_x86<E>)
-      if ((a.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND ||
-          (b.encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND)
+      if ((a.encoding & UNWIND_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND ||
+          (b.encoding & UNWIND_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND)
         return false;
 
     return a.get_func_addr(ctx) + a.code_len == b.get_func_addr(ctx) &&
