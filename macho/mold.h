@@ -26,6 +26,7 @@ template <typename E> class ObjectFile;
 template <typename E> class OutputSection;
 template <typename E> class Subsection;
 template <typename E> struct Context;
+template <typename E> struct FdeRecord;
 template <typename E> struct Symbol;
 
 //
@@ -89,6 +90,7 @@ struct UnwindRecord {
   Subsection<E> *subsec = nullptr;
   Symbol<E> *personality = nullptr;
   Subsection<E> *lsda = nullptr;
+  FdeRecord<E> *fde = nullptr;
   u32 input_offset = 0;
   u32 code_len = 0;
   u32 encoding = 0;
@@ -98,11 +100,12 @@ struct UnwindRecord {
 template <typename E>
 struct CieRecord {
   void parse(Context<E> &ctx);
+
   std::string_view get_contents() const;
   i64 size() const { return get_contents().size(); }
   void copy_to(Context<E> &ctx);
 
-  ObjectFile<E> *file = nullptr;
+  ObjectFile<E> *file;
   Symbol<E> *personality = nullptr;
   u32 input_addr = 0;
   u32 personality_offset = 0;
@@ -112,12 +115,15 @@ struct CieRecord {
 
 template <typename E>
 struct FdeRecord {
+  void parse(Context<E> &ctx);
   std::string_view get_contents(ObjectFile<E> &file) const;
   i64 size(ObjectFile<E> &file) const { return get_contents(file).size(); }
   Subsection<E> *get_cie(Context<E> &ctx, ObjectFile<E> &file);
   void copy_to(Context<E> &ctx, ObjectFile<E> &file);
 
+  CieRecord<E> *cie = nullptr;
   Subsection<E> *func = nullptr;
+  Subsection<E> *lsda = nullptr;
   u32 input_addr = 0;
   u32 output_offset = (u32)-1;
 };
@@ -174,6 +180,7 @@ public:
   LoadCommand *find_load_command(Context<E> &ctx, u32 type);
   void parse_compact_unwind(Context<E> &ctx);
   void parse_eh_frame(Context<E> &ctx);
+  void associate_compact_unwind(Context<E> &ctx);
   void parse_mod_init_func(Context<E> &ctx);
   void resolve_symbols(Context<E> &ctx) override;
   void compute_symtab_size(Context<E> &ctx) override;
@@ -333,6 +340,7 @@ public:
   Atomic<bool> is_alive = true;
   bool added_to_osec : 1 = false;
   bool is_replaced : 1 = false;
+  bool has_compact_unwind : 1 = false;
 };
 
 template <typename E>

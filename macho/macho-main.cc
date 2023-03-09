@@ -307,6 +307,7 @@ static bool compare_chunks(const Chunk<E> *a, const Chunk<E> *b) {
     "__stub_helper",
     "__gcc_except_tab",
     "__cstring",
+    "__eh_frame",
     "__unwind_info",
     // __DATA_CONST
     "__got",
@@ -697,6 +698,10 @@ static void scan_relocations(Context<E> &ctx) {
         if (rec.personality)
           rec.personality->flags |= NEEDS_GOT;
     }
+
+    for (CieRecord<E> &cie : file->cies)
+      if (cie.personality)
+        cie.personality->flags |= NEEDS_GOT;
   });
 
   std::vector<InputFile<E> *> files;

@@ -98,6 +98,8 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
   if (eh_frame_sec)
     parse_eh_frame(ctx);
 
+  associate_compact_unwind(ctx);
+
   if (mod_init_func)
     parse_mod_init_func(ctx);
 }
@@ -571,17 +573,15 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
     case offsetof(CompactUnwindEntry<E>, lsda): {
       u32 addr = *(ul32 *)((u8 *)this->mf->data + hdr.offset + r.offset);
 
-      Subsection<E> *target;
-      if (r.is_extern)
-        target = sym_to_subsec[r.idx];
-      else
-        target = find_subsection(ctx, addr);
-
-      if (!target)
-        error();
-
-      dst.lsda = target;
-      dst.lsda_offset = target->input_addr - addr;
+      if (r.is_extern) {
+        dst.lsda = sym_to_subsec[r.idx];
+        dst.lsda_offset = addr;
+      } else {
+        dst.lsda = find_subsection(ctx, addr);
+        if (!dst.lsda)
+          error();
+        dst.lsda_offset = addr - dst.lsda->input_addr;
+      }
       break;
     }
     default:
@@ -589,26 +589,18 @@ void ObjectFile<E>::parse_compact_unwind(Context<E> &ctx) {
     }
   }
 
-  for (i64 i = 0; i < num_entries; i++)
-    if (!unwind_records[i].subsec)
-      Fatal(ctx) << *this << ": __compact_unwind: missing relocation at " << i;
-
-  // Sort unwind entries by offset
-  sort(unwind_records, [](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
-    return std::tuple(a.subsec->input_addr, a.input_offset) <
-           std::tuple(b.subsec->input_addr, b.input_offset);
+  // We want to ignore compact unwind records that point to DWARF unwind
+  // info because we synthesize them ourselves. Object files usually don't
+  // contain such records, but `ld -r` often produces them.
+  std::erase_if(unwind_records, [](UnwindRecord<E> &rec) {
+    return (rec.encoding & UNWIND_MODE_MASK) == E::unwind_mode_dwarf;
   });
 
-  // Associate unwind entries to subsections
-  for (i64 i = 0; i < num_entries;) {
-    Subsection<E> &subsec = *unwind_records[i].subsec;
-    subsec.unwind_offset = i;
-
-    i64 j = i + 1;
-    while (j < num_entries && unwind_records[j].subsec == &subsec)
-      j++;
-    subsec.nunwind = j - i;
-    i = j;
+  for (UnwindRecord<E> &rec : unwind_records) {
+    if (!rec.subsec)
+      Fatal(ctx) << *this << ": __compact_unwind: missing relocation at offset 0x"
+                 << std::hex << rec.input_offset;
+    rec.subsec->has_compact_unwind = true;
   }
 }
 
@@ -683,7 +675,6 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
         .file = this,
         .input_addr = (u32)(eh_frame_sec->addr + offset),
       });
-      cies.back().parse(ctx);
     } else {
       u64 addr = *(il64 *)(data.data() + 8) + eh_frame_sec->addr + offset + 8;
       Subsection<E> *func = find_subsection(ctx, addr);
@@ -691,14 +682,25 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
         Fatal(ctx) << *this << ": __unwind_info: FDE with invalid function"
                    << " reference at 0x" << std::hex << offset;
 
-      fdes.push_back(FdeRecord<E>{
-        .func = func,
-        .input_addr = (u32)(eh_frame_sec->addr + offset),
-      });
+      if (!func->has_compact_unwind) {
+        fdes.push_back(FdeRecord<E>{
+          .func = func,
+          .input_addr = (u32)(eh_frame_sec->addr + offset),
+       });
+      }
     }
 
     data = data.substr(len + 4);
   }
+
+  sort(fdes, [](const FdeRecord<E> &a, const FdeRecord<E> &b) {
+    return a.func->input_addr < b.func->input_addr;
+  });
+
+  for (CieRecord<E> &cie : cies)
+    cie.parse(ctx);
+  for (FdeRecord<E> &fde : fdes)
+    fde.parse(ctx);
 
   // Associate relocations to CIEs
   MachRel *mach_rels = (MachRel *)(this->mf->data + eh_frame_sec->reloff);
@@ -723,6 +725,38 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
     CieRecord<E> *cie = find_cie(eh_frame_sec->addr + r.offset);
     cie->personality = this->syms[r.idx];
     cie->personality_offset = eh_frame_sec->addr + r.offset - cie->input_addr;
+  }
+}
+
+template <typename E>
+void ObjectFile<E>::associate_compact_unwind(Context<E> &ctx) {
+  // If a subsection has a DWARF unwind info, we need to create a compact
+  // unwind record that points to it.
+  for (FdeRecord<E> &fde : fdes) {
+    unwind_records.push_back(UnwindRecord<E>{
+      .subsec = fde.func,
+      .fde = &fde,
+      .input_offset = 0,
+      .code_len = fde.func->input_size,
+    });
+  }
+
+  // Sort unwind entries by offset
+  sort(unwind_records, [](const UnwindRecord<E> &a, const UnwindRecord<E> &b) {
+    return std::tuple(a.subsec->input_addr, a.input_offset) <
+           std::tuple(b.subsec->input_addr, b.input_offset);
+  });
+
+  // Associate unwind entries to subsections
+  for (i64 i = 0, end = unwind_records.size(); i < end;) {
+    Subsection<E> &subsec = *unwind_records[i].subsec;
+    subsec.unwind_offset = i;
+
+    i64 j = i + 1;
+    while (j < end && unwind_records[j].subsec == &subsec)
+      j++;
+    subsec.nunwind = j - i;
+    i = j;
   }
 }
 

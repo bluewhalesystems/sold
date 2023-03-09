@@ -11,7 +11,7 @@ static void collect_root_set(Context<E> &ctx,
   Timer t(ctx, "collect_root_set");
 
   auto add = [&](Symbol<E> *sym) {
-    if (sym->subsec)
+    if (sym && sym->subsec)
       rootset.push_back(sym->subsec);
   };
 
@@ -38,6 +38,9 @@ static void collect_root_set(Context<E> &ctx,
           hdr.type == S_MOD_INIT_FUNC_POINTERS ||
           hdr.type == S_MOD_TERM_FUNC_POINTERS)
         rootset.push_back(subsec);
+
+    for (CieRecord<E> &cie : file->cies)
+      add(cie.personality);
   });
 
   for (std::string_view name : ctx.arg.u)
@@ -68,8 +71,14 @@ static void visit(Context<E> &ctx, Subsection<E> *subsec) {
   for (UnwindRecord<E> &rec : subsec->get_unwind_records()) {
     visit(ctx, rec.subsec);
     visit(ctx, rec.lsda);
+
     if (rec.personality)
       visit(ctx, rec.personality->subsec);
+
+    if (rec.fde) {
+      visit(ctx, rec.fde->func);
+      visit(ctx, rec.fde->lsda);
+    }
   }
 }
 

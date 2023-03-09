@@ -2073,8 +2073,11 @@ void UnwindInfoSection<E>::compute_size(Context<E> &ctx) {
   };
 
   for (UnwindRecord<E> *rec : records) {
-    if (rec->personality)
+    if (rec->fde)
+      rec->encoding = E::unwind_mode_dwarf | rec->fde->output_offset;
+    else if (rec->personality)
       rec->encoding |= encode_personality(rec->personality);
+
     if (rec->lsda)
       num_lsda++;
   }
@@ -2161,7 +2164,7 @@ void CieRecord<E>::parse(Context<E> &ctx) {
     case 'R':
       break;
     default:
-      Fatal(ctx) << *file << ": __eh_frame: unknown augmented string: " << aug;
+      Fatal(ctx) << file << ": __eh_frame: unknown augmented string: " << aug;
     }
   }
 }
@@ -2188,6 +2191,39 @@ void CieRecord<E>::copy_to(Context<E> &ctx) {
 }
 
 template <typename E>
+void FdeRecord<E>::parse(Context<E> &ctx) {
+  ObjectFile<E> &file = func->isec->file;
+
+  auto find_cie = [&](u32 addr) {
+    for (CieRecord<E> &cie : file.cies)
+      if (cie.input_addr == addr)
+        return &cie;
+    Fatal(ctx) << file << ": cannot find a CIE for a FDE at address 0x"
+               << std::hex << input_addr;
+  };
+
+  // Initialize cie
+  std::string_view data = get_contents(file);
+  i64 cie_offset = *(ul32 *)(data.data() + 4);
+  cie = find_cie(input_addr + 4 - cie_offset);
+
+  // Initialize lsda
+  if (cie->has_lsda) {
+    u8 *buf = (u8 *)get_contents(file).data();
+    u8 *aug = buf + 24;
+    read_uleb(aug); // skip Augmentation Data Length
+
+    i64 offset = aug - buf;
+    u64 addr = *(ul32 *)aug + input_addr + offset;
+
+    lsda = file.find_subsection(ctx, addr);
+    if (!lsda)
+      Fatal(ctx) << file << ": cannot find a LSDA for a FDE at address 0x"
+                 << std::hex << input_addr;
+  }
+}
+
+template <typename E>
 std::string_view FdeRecord<E>::get_contents(ObjectFile<E> &file) const {
   const char *data = file.mf->get_contents().data() + file.eh_frame_sec->offset +
                      input_addr - file.eh_frame_sec->addr;
@@ -2203,34 +2239,18 @@ void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
   memcpy(buf, data.data(), data.size());
 
   // Relocate CIE offset
-  auto find_cie = [&](i64 addr) {
-    for (CieRecord<E> &cie : file.cies)
-      if (cie.input_addr == addr)
-        return &cie;
-    Fatal(ctx) << file << ": cannot find a CIE for a FDE at address 0x"
-               << std::hex << input_addr;
-  };
-
-  i64 cie_offset = *(ul32 *)(data.data() + 4);
-  CieRecord<E> *cie = find_cie(input_addr + 4 - cie_offset);
-
   *(ul32 *)(buf + 4) = output_offset + 4 - cie->output_offset;
 
   // Relocate function start address
   u64 output_addr = ctx.eh_frame.hdr.addr + output_offset;
   *(ul64 *)(buf + 8) = (i32)(func->get_addr(ctx) - output_addr - 8);
 
-  if (cie->has_lsda) {
+  if (lsda) {
     u8 *aug = buf + 24;
     read_uleb(aug); // skip Augmentation Data Length
 
     i64 offset = aug - buf;
     u64 addr = *(ul32 *)aug + input_addr + offset;
-
-    Subsection<E> *lsda = file.find_subsection(ctx, addr);
-    if (!lsda)
-      Fatal(ctx) << file << ": cannot find a LSDA for a FDE at address 0x"
-                 << std::hex << input_addr;
 
     *(ul32 *)aug = lsda->get_addr(ctx) - output_addr - offset +
                    addr - lsda->input_addr;
@@ -2239,11 +2259,10 @@ void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
 
 template <typename E>
 void EhFrameSection<E>::compute_size(Context<E> &ctx) {
-  // Remove FDEs pointing to dead functions or functions that already
-  // have compact unwind info.
+  // Remove FDEs for discarded functions
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->fdes, [](FdeRecord<E> &fde) {
-      return !fde.func->is_alive || fde.func->nunwind;
+      return !fde.func->is_alive;
     });
   });
 
