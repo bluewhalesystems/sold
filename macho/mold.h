@@ -111,6 +111,7 @@ struct CieRecord {
   u32 personality_offset = 0;
   u32 output_offset = (u32)-1;
   bool has_lsda = false;
+  bool is_alive = false;
 };
 
 template <typename E>

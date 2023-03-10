@@ -2259,19 +2259,23 @@ void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
 
 template <typename E>
 void EhFrameSection<E>::compute_size(Context<E> &ctx) {
-  // Remove FDEs for discarded functions
+  // Remove dead CIEs and FDEs
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->fdes, [](FdeRecord<E> &fde) {
       return !fde.func->is_alive;
+    });
+
+    for (FdeRecord<E> &fde : file->fdes)
+      fde.cie->is_alive = true;
+
+    std::erase_if(file->cies, [](CieRecord<E> &cie) {
+      return !cie.is_alive;
     });
   });
 
   i64 offset = 0;
 
   for (ObjectFile<E> *file : ctx.objs) {
-    if (file->fdes.empty())
-      continue;
-
     for (CieRecord<E> &cie : file->cies) {
       cie.output_offset = offset;
       offset += cie.size();
@@ -2289,9 +2293,6 @@ void EhFrameSection<E>::compute_size(Context<E> &ctx) {
 template <typename E>
 void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    if (file->fdes.empty())
-      return;
-
     for (CieRecord<E> &cie : file->cies)
       cie.copy_to(ctx);
 
