@@ -51,25 +51,25 @@ static void collect_root_set(Context<E> &ctx,
 }
 
 template <typename E>
-static void visit(Context<E> &ctx, Subsection<E> &subsec) {
-  if (subsec.is_alive.test_and_set())
+static void visit(Context<E> &ctx, Subsection<E> *subsec) {
+  if (!subsec)
     return;
 
-  for (Relocation<E> &rel : subsec.get_rels()) {
-    if (rel.sym()) {
-      if (rel.sym()->subsec)
-        visit(ctx, *rel.sym()->subsec);
-    } else {
-      visit(ctx, *rel.subsec());
-    }
+  if (subsec->is_alive.test_and_set())
+    return;
+
+  for (Relocation<E> &rel : subsec->get_rels()) {
+    if (rel.sym())
+      visit(ctx, rel.sym()->subsec);
+    else
+      visit(ctx, rel.subsec());
   }
 
-  for (UnwindRecord<E> &rec : subsec.get_unwind_records()) {
-    visit(ctx, *rec.subsec);
-    if (rec.lsda)
-      visit(ctx, *rec.lsda);
-    if (rec.personality && rec.personality->subsec)
-      visit(ctx, *rec.personality->subsec);
+  for (UnwindRecord<E> &rec : subsec->get_unwind_records()) {
+    visit(ctx, rec.subsec);
+    visit(ctx, rec.lsda);
+    if (rec.personality)
+      visit(ctx, rec.personality->subsec);
   }
 }
 
@@ -93,7 +93,7 @@ static void mark(Context<E> &ctx,
   Timer t(ctx, "mark");
 
   tbb::parallel_for_each(rootset, [&](Subsection<E> *subsec) {
-    visit(ctx, *subsec);
+    visit(ctx, subsec);
   });
 
   Atomic<bool> repeat;
@@ -104,7 +104,7 @@ static void mark(Context<E> &ctx,
         if ((subsec->isec->hdr.attr & S_ATTR_LIVE_SUPPORT) &&
             !subsec->is_alive &&
             refers_to_live_subsection(*subsec)) {
-          visit(ctx, *subsec);
+          visit(ctx, subsec);
           repeat = true;
         }
       }
