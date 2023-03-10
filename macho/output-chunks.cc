@@ -2203,13 +2203,13 @@ void FdeRecord<E>::parse(Context<E> &ctx) {
   };
 
   // Initialize cie
-  std::string_view data = get_contents(file);
+  std::string_view data = get_contents();
   i64 cie_offset = *(ul32 *)(data.data() + 4);
   cie = find_cie(input_addr + 4 - cie_offset);
 
   // Initialize lsda
   if (cie->has_lsda) {
-    u8 *buf = (u8 *)get_contents(file).data();
+    u8 *buf = (u8 *)get_contents().data();
     u8 *aug = buf + 24;
     read_uleb(aug); // skip Augmentation Data Length
 
@@ -2224,18 +2224,19 @@ void FdeRecord<E>::parse(Context<E> &ctx) {
 }
 
 template <typename E>
-std::string_view FdeRecord<E>::get_contents(ObjectFile<E> &file) const {
+std::string_view FdeRecord<E>::get_contents() const {
+  ObjectFile<E> &file = func->isec->file;
   const char *data = file.mf->get_contents().data() + file.eh_frame_sec->offset +
                      input_addr - file.eh_frame_sec->addr;
   return {data, (size_t)*(ul32 *)data + 4};
 }
 
 template <typename E>
-void FdeRecord<E>::copy_to(Context<E> &ctx, ObjectFile<E> &file) {
+void FdeRecord<E>::copy_to(Context<E> &ctx) {
   u8 *buf = ctx.buf + ctx.eh_frame.hdr.offset + output_offset;
 
   // Copy FDE contents
-  std::string_view data = get_contents(file);
+  std::string_view data = get_contents();
   memcpy(buf, data.data(), data.size());
 
   // Relocate CIE offset
@@ -2283,7 +2284,7 @@ void EhFrameSection<E>::compute_size(Context<E> &ctx) {
 
     for (FdeRecord<E> &fde : file->fdes) {
       fde.output_offset = offset;
-      offset += fde.size(*file);
+      offset += fde.size();
     }
   }
 
@@ -2297,7 +2298,7 @@ void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
       cie.copy_to(ctx);
 
     for (FdeRecord<E> &fde : file->fdes)
-      fde.copy_to(ctx, *file);
+      fde.copy_to(ctx);
   });
 }
 

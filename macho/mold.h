@@ -117,10 +117,9 @@ struct CieRecord {
 template <typename E>
 struct FdeRecord {
   void parse(Context<E> &ctx);
-  std::string_view get_contents(ObjectFile<E> &file) const;
-  i64 size(ObjectFile<E> &file) const { return get_contents(file).size(); }
-  Subsection<E> *get_cie(Context<E> &ctx, ObjectFile<E> &file);
-  void copy_to(Context<E> &ctx, ObjectFile<E> &file);
+  std::string_view get_contents() const;
+  i64 size() const { return get_contents().size(); }
+  void copy_to(Context<E> &ctx);
 
   CieRecord<E> *cie = nullptr;
   Subsection<E> *func = nullptr;
