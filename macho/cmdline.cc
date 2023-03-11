@@ -91,6 +91,7 @@ Options:
                               Search for a given framework
   -no_deduplicate             Ignored
   -no_function_starts         Do not generate an LC_FUNCTION_STARTS load command
+  -no_implicit_dylibs         Do not optimize references to system libraries
   -no_uuid                    Do not generate an LC_UUID load command
   -o <FILE>                   Set output filename
   -objc_abi_version <VERSION> Ignored
@@ -475,6 +476,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_flag("-no_deduplicate")) {
     } else if (read_flag("-no_function_starts")) {
       ctx.arg.function_starts = false;
+    } else if (read_flag("-no_implicit_dylibs")) {
+      ctx.arg.implicit_dylibs = false;
     } else if (read_flag("-no_uuid")) {
       ctx.arg.uuid = UUID_NONE;
     } else if (read_arg("-o")) {

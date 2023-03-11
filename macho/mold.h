@@ -256,6 +256,7 @@ public:
 
   std::vector<std::string_view> reexported_libs;
   std::vector<std::string> rpaths;
+  std::vector<DylibFile<E> *> hoisted_libs;
 
 private:
   DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf);
@@ -1058,6 +1059,7 @@ struct ReaderContext {
   bool hidden = false;
   bool weak = false;
   bool reexport = false;
+  bool implicit = false;
 };
 
 template <typename E>
@@ -1121,6 +1123,7 @@ struct Context {
     bool fixup_chains = false;
     bool flat_namespace = false;
     bool function_starts = true;
+    bool implicit_dylibs = true;
     bool init_offsets = false;
     bool mark_dead_strippable_dylib = false;
     bool noinhibit_exec = false;

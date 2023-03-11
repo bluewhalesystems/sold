@@ -1,6 +1,8 @@
 #include "mold.h"
 #include "../common/archive-file.h"
 
+#include <regex>
+
 namespace mold::macho {
 
 template <typename E>
@@ -1355,10 +1357,16 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   }
 }
 
-template <typename E>
-static bool is_dead_strippable(Context<E> &ctx, MappedFile<Context<E>> *mf) {
-  return get_file_type(ctx, mf) == FileType::MACH_DYLIB &&
-         (((MachHeader *)mf->data)->flags & MH_DEAD_STRIPPABLE_DYLIB);
+static bool is_system_dylib(std::string_view path) {
+  if (!path.starts_with("/usr/lib/") &&
+      !path.starts_with("/System/Library/Frameworks/"))
+    return false;
+
+  static std::regex re(
+    R"(/usr/lib/.+\.dylib|/System/Library/Frameworks/([^/]+)\.framework/.+/\1)",
+    std::regex_constants::ECMAScript | std::regex_constants::optimize);
+
+  return std::regex_match(path.begin(), path.end(), re);
 }
 
 template <typename E>
@@ -1368,10 +1376,20 @@ DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
   this->is_weak = ctx.reader.weak;
   this->is_reexported = ctx.reader.reexport;
 
-  // Even if -dead_strip was not given, a dylib with
-  // MH_DEAD_STRIPPABLE_DYLIB is dead-stripped if unreferenced.
-  bool dead_strippable = ctx.arg.dead_strip_dylibs || is_dead_strippable(ctx, mf);
-  this->is_alive = ctx.reader.needed || !dead_strippable;
+  if (ctx.reader.implicit) {
+    // Libraries implicitly specified by LC_LINKER_OPTION are dead-stripped
+    // if not used.
+    this->is_alive = false;
+  } else {
+    // Even if -dead_strip was not given, a dylib with
+    // MH_DEAD_STRIPPABLE_DYLIB is dead-stripped if unreferenced.
+    bool is_dead_strippable_dylib =
+      get_file_type(ctx, mf) == FileType::MACH_DYLIB &&
+      (((MachHeader *)mf->data)->flags & MH_DEAD_STRIPPABLE_DYLIB);
+
+    bool is_dead_strippable = ctx.arg.dead_strip_dylibs || is_dead_strippable_dylib;
+    this->is_alive = ctx.reader.needed || !is_dead_strippable;
+  }
 }
 
 template <typename E>
@@ -1460,8 +1478,25 @@ void DylibFile<E>::parse(Context<E> &ctx) {
 
     DylibFile<E> *child = DylibFile<E>::create(ctx, mf);
     child->parse(ctx);
-    for (auto [name, flags] : child->exports)
-      add_export(ctx, name, flags);
+
+    // By default, symbols defined by re-exported libraries are handled as
+    // if they were defined by the umbrella library. At runtime, the dynamic
+    // linker tries to find re-exported symbols from re-exported libraries.
+    // That incurs some run-time cost because the runtime has to do linear
+    // search.
+    //
+    // As an exception, system libraries get different treatment. Their
+    // symbols are directly linked against their original library names
+    // even if they are re-exported to reduce the cost of runtime symbol
+    // lookup. This optimization can be disable by passing `-no_implicit_dylibs`.
+    if (ctx.arg.implicit_dylibs && is_system_dylib(child->install_name)) {
+      hoisted_libs.push_back(child);
+      child->is_alive = false;
+    } else {
+      for (auto [name, flags] : child->exports)
+        add_export(ctx, name, flags);
+      append(hoisted_libs, child->hoisted_libs);
+    }
   }
 
   // Initialize syms

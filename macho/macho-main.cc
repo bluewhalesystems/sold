@@ -53,6 +53,7 @@ static void resolve_symbols(Context<E> &ctx) {
   if (has_lto_obj(ctx))
     do_lto(ctx);
 
+  // We want to keep symbols may be referenced indirectly.
   for (std::string_view name : ctx.arg.u)
     if (InputFile<E> *file = get_symbol(ctx, name)->file)
       file->is_alive = true;
@@ -60,6 +61,14 @@ static void resolve_symbols(Context<E> &ctx) {
   if (InputFile<E> *file = ctx.arg.entry->file)
     file->is_alive = true;
 
+  if (InputFile<E> *file = ctx._objc_msgSend->file; file && file->is_dylib)
+    file->is_alive = true;
+
+  if (!ctx.arg.fixup_chains)
+    if (InputFile<E> *file = ctx.dyld_stub_binder->file; file && file->is_dylib)
+      file->is_alive = true;
+
+  // Mark reachable object files
   std::vector<ObjectFile<E> *> live_objs;
   for (ObjectFile<E> *file : ctx.objs)
     if (file->is_alive)
@@ -86,6 +95,10 @@ static void resolve_symbols(Context<E> &ctx) {
 
   std::erase_if(ctx.objs, [](InputFile<E> *file) { return !file->is_alive; });
   std::erase_if(ctx.dylibs, [](InputFile<E> *file) { return !file->is_alive; });
+
+  for (i64 i = 1; DylibFile<E> *file : ctx.dylibs)
+    if (file->dylib_idx != BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE)
+      file->dylib_idx = i++;
 }
 
 template <typename E>
@@ -976,8 +989,7 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
   std::unordered_set<std::string> libs;
   std::unordered_set<std::string> frameworks;
 
-  auto search = [&](std::vector<std::string> names)
-      -> MappedFile<Context<E>> * {
+  auto search = [&](std::vector<std::string> names) -> MappedFile<Context<E>> * {
     for (std::string dir : ctx.arg.library_paths) {
       for (std::string name : names) {
         std::string path = dir + "/lib" + name;
@@ -1125,6 +1137,9 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
     ObjectFile<E> *file = ctx.objs[i];
     std::vector<std::string> opts = file->get_linker_options(ctx);
 
+    ReaderContext orig = ctx.reader;
+    ctx.reader.implicit = true;
+
     for (i64 j = 0; j < opts.size();) {
       if (opts[j] == "-framework") {
         if (frameworks.insert(opts[j + 1]).second)
@@ -1133,15 +1148,26 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
         j += 2;
       } else if (opts[j].starts_with("-l")) {
         std::string name = opts[j].substr(2);
-        if (libs.insert(name).second)
+        if (libs.insert(name).second) {
           if (MappedFile<Context<E>> *mf = find_library(name))
             read_file(ctx, mf);
+        }
         j++;
       } else {
         Fatal(ctx) << *file << ": unknown LC_LINKER_OPTION command: " << opts[j];
       }
     }
+
+    ctx.reader = orig;
   }
+
+  ctx.tg.wait();
+
+  std::unordered_set<std::string_view> hoisted_libs;
+  for (i64 i = 0; i < ctx.dylibs.size(); i++)
+    for (DylibFile<E> *file : ctx.dylibs[i]->hoisted_libs)
+      if (hoisted_libs.insert(file->install_name).second)
+        ctx.dylibs.push_back(file);
 
   if (ctx.objs.empty())
     Fatal(ctx) << "no input files";
@@ -1154,8 +1180,6 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
   for (i64 i = 1; DylibFile<E> *file : ctx.dylibs)
     if (file->dylib_idx != BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE)
       file->dylib_idx = i++;
-
-  ctx.tg.wait();
 }
 
 template <typename E>
