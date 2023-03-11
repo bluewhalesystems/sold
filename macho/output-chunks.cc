@@ -2006,6 +2006,7 @@ merge_unwind_records(Context<E> &ctx, std::vector<UnwindRecord<E> *> &records) {
     return a.get_func_addr(ctx) + a.code_len == b.get_func_addr(ctx) &&
            a.encoding == b.encoding &&
            a.personality == b.personality &&
+           a.fde == b.fde &&
            !a.lsda && !b.lsda;
   };
 
@@ -2145,8 +2146,8 @@ void ThreadPtrsSection<E>::copy_buf(Context<E> &ctx) {
   memset(buf, 0, this->hdr.size);
 
   for (i64 i = 0; i < syms.size(); i++)
-    if (Symbol<E> &sym = *syms[i]; !sym.is_imported)
-      buf[i] = sym.get_addr(ctx);
+    if (!syms[i]->is_imported)
+      buf[i] = syms[i]->get_addr(ctx);
 }
 
 // Parse CIE augmented string
