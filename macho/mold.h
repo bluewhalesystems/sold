@@ -122,7 +122,7 @@ struct FdeRecord {
   void copy_to(Context<E> &ctx);
 
   CieRecord<E> *cie = nullptr;
-  Subsection<E> *func = nullptr;
+  Subsection<E> *subsec = nullptr;
   Subsection<E> *lsda = nullptr;
   u32 input_addr = 0;
   u32 output_offset = (u32)-1;

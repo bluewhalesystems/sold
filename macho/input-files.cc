@@ -677,14 +677,14 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
       });
     } else {
       u64 addr = *(il64 *)(data.data() + 8) + eh_frame_sec->addr + offset + 8;
-      Subsection<E> *func = find_subsection(ctx, addr);
-      if (!func)
+      Subsection<E> *subsec = find_subsection(ctx, addr);
+      if (!subsec)
         Fatal(ctx) << *this << ": __unwind_info: FDE with invalid function"
                    << " reference at 0x" << std::hex << offset;
 
-      if (!func->has_compact_unwind) {
+      if (!subsec->has_compact_unwind) {
         fdes.push_back(FdeRecord<E>{
-          .func = func,
+          .subsec = subsec,
           .input_addr = (u32)(eh_frame_sec->addr + offset),
        });
       }
@@ -694,7 +694,7 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
   }
 
   sort(fdes, [](const FdeRecord<E> &a, const FdeRecord<E> &b) {
-    return a.func->input_addr < b.func->input_addr;
+    return a.subsec->input_addr < b.subsec->input_addr;
   });
 
   for (CieRecord<E> &cie : cies)
@@ -734,10 +734,10 @@ void ObjectFile<E>::associate_compact_unwind(Context<E> &ctx) {
   // unwind record that points to it.
   for (FdeRecord<E> &fde : fdes) {
     unwind_records.push_back(UnwindRecord<E>{
-      .subsec = fde.func,
+      .subsec = fde.subsec,
       .fde = &fde,
       .input_offset = 0,
-      .code_len = fde.func->input_size,
+      .code_len = fde.subsec->input_size,
     });
   }
 

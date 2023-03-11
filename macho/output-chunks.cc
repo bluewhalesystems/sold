@@ -2193,7 +2193,7 @@ void CieRecord<E>::copy_to(Context<E> &ctx) {
 
 template <typename E>
 void FdeRecord<E>::parse(Context<E> &ctx) {
-  ObjectFile<E> &file = func->isec->file;
+  ObjectFile<E> &file = subsec->isec->file;
 
   auto find_cie = [&](u32 addr) {
     for (CieRecord<E> &cie : file.cies)
@@ -2226,7 +2226,7 @@ void FdeRecord<E>::parse(Context<E> &ctx) {
 
 template <typename E>
 std::string_view FdeRecord<E>::get_contents() const {
-  ObjectFile<E> &file = func->isec->file;
+  ObjectFile<E> &file = subsec->isec->file;
   const char *data = file.mf->get_contents().data() + file.eh_frame_sec->offset +
                      input_addr - file.eh_frame_sec->addr;
   return {data, (size_t)*(ul32 *)data + 4};
@@ -2245,7 +2245,7 @@ void FdeRecord<E>::copy_to(Context<E> &ctx) {
 
   // Relocate function start address
   u64 output_addr = ctx.eh_frame.hdr.addr + output_offset;
-  *(ul64 *)(buf + 8) = (i32)(func->get_addr(ctx) - output_addr - 8);
+  *(ul64 *)(buf + 8) = (i32)(subsec->get_addr(ctx) - output_addr - 8);
 
   if (lsda) {
     u8 *aug = buf + 24;
@@ -2264,7 +2264,7 @@ void EhFrameSection<E>::compute_size(Context<E> &ctx) {
   // Remove dead CIEs and FDEs
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     std::erase_if(file->fdes, [](FdeRecord<E> &fde) {
-      return !fde.func->is_alive;
+      return !fde.subsec->is_alive;
     });
 
     for (FdeRecord<E> &fde : file->fdes)

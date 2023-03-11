@@ -76,7 +76,7 @@ static void visit(Context<E> &ctx, Subsection<E> *subsec) {
       visit(ctx, rec.personality->subsec);
 
     if (rec.fde) {
-      visit(ctx, rec.fde->func);
+      visit(ctx, rec.fde->subsec);
       visit(ctx, rec.fde->lsda);
     }
   }
