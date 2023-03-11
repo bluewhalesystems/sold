@@ -20,7 +20,7 @@ static void write_add_ldst(u8 *loc, u32 val) {
   u32 insn = *(ul32 *)loc;
   i64 scale = 0;
 
-  if ((insn & 0x3b000000) == 0x39000000) {
+  if ((insn & 0x3b00'0000) == 0x3900'0000) {
     // LDR/STR accesses an aligned 1, 2, 4, 8 or 16 byte data on memory.
     // The immediate is scaled by the data size, so we need to know the
     // data size to write a correct immediate.
@@ -52,9 +52,9 @@ void StubsSection<E>::copy_buf(Context<E> &ctx) {
 
   for (i64 i = 0; i < syms.size(); i++) {
     static const ul32 insn[] = {
-      0x90000010, // adrp x16, $ptr@PAGE
-      0xf9400210, // ldr  x16, [x16, $ptr@PAGEOFF]
-      0xd61f0200, // br   x16
+      0x9000'0010, // adrp x16, $ptr@PAGE
+      0xf940'0210, // ldr  x16, [x16, $ptr@PAGEOFF]
+      0xd61f'0200, // br   x16
     };
 
     static_assert(sizeof(insn) == E::stub_size);
@@ -83,12 +83,12 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
   ul32 *buf = start;
 
   static const ul32 insn0[] = {
-    0x90000011, // adrp x17, $__dyld_private@PAGE
-    0x91000231, // add  x17, x17, $__dyld_private@PAGEOFF
-    0xa9bf47f0, // stp  x16, x17, [sp, #-16]!
-    0x90000010, // adrp x16, $dyld_stub_binder@PAGE
-    0xf9400210, // ldr  x16, [x16, $dyld_stub_binder@PAGEOFF]
-    0xd61f0200, // br   x16
+    0x9000'0011, // adrp x17, $__dyld_private@PAGE
+    0x9100'0231, // add  x17, x17, $__dyld_private@PAGEOFF
+    0xa9bf'47f0, // stp  x16, x17, [sp, #-16]!
+    0x9000'0010, // adrp x16, $dyld_stub_binder@PAGE
+    0xf940'0210, // ldr  x16, [x16, $dyld_stub_binder@PAGEOFF]
+    0xd61f'0200, // br   x16
   };
 
   static_assert(sizeof(insn0) == E::stub_helper_hdr_size);
@@ -107,9 +107,9 @@ void StubHelperSection<E>::copy_buf(Context<E> &ctx) {
 
   for (i64 i = 0; i < ctx.stubs.syms.size(); i++) {
     static const ul32 insn[] = {
-      0x18000050, // ldr  w16, addr
-      0x14000000, // b    stubHelperHeader
-      0x00000000, // addr: .long <idx>
+      0x1800'0050, // ldr  w16, addr
+      0x1400'0000, // b    stubHelperHeader
+      0x0000'0000, // addr: .long <idx>
     };
 
     static_assert(sizeof(insn) == E::stub_helper_size);
@@ -130,14 +130,14 @@ void ObjcStubsSection<E>::copy_buf(Context<E> &ctx) {
     return;
 
   static const ul32 insn[] = {
-    0x90000001, // adrp  x1, @selector("foo")@PAGE
-    0xf9400021, // ldr   x1, [x1, @selector("foo")@PAGEOFF]
-    0x90000010, // adrp  x16, _objc_msgSend@GOTPAGE
-    0xf9400210, // ldr   x16, [x16, _objc_msgSend@GOTPAGEOFF]
-    0xd61f0200, // br    x16
-    0xd4200020, // brk   #0x1
-    0xd4200020, // brk   #0x1
-    0xd4200020, // brk   #0x1
+    0x9000'0001, // adrp  x1, @selector("foo")@PAGE
+    0xf940'0021, // ldr   x1, [x1, @selector("foo")@PAGEOFF]
+    0x9000'0010, // adrp  x16, _objc_msgSend@GOTPAGE
+    0xf940'0210, // ldr   x16, [x16, _objc_msgSend@GOTPAGEOFF]
+    0xd61f'0200, // br    x16
+    0xd420'0020, // brk   #0x1
+    0xd420'0020, // brk   #0x1
+    0xd420'0020, // brk   #0x1
   };
   static_assert(sizeof(insn) == ENTRY_SIZE);
 
@@ -345,9 +345,9 @@ void RangeExtensionThunk<E>::copy_buf(Context<E> &ctx) {
   u8 *buf = ctx.buf + output_section.hdr.offset + offset;
 
   static const ul32 data[] = {
-    0x90000010, // adrp x16, 0   # R_AARCH64_ADR_PREL_PG_HI21
-    0x91000210, // add  x16, x16 # R_AARCH64_ADD_ABS_LO12_NC
-    0xd61f0200, // br   x16
+    0x9000'0010, // adrp x16, 0   # R_AARCH64_ADR_PREL_PG_HI21
+    0x9100'0210, // add  x16, x16 # R_AARCH64_ADD_ABS_LO12_NC
+    0xd61f'0200, // br   x16
   };
 
   static_assert(ENTRY_SIZE == sizeof(data));
