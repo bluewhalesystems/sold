@@ -37,8 +37,8 @@ ObjectFile<E>::create(Context<E> &ctx, MappedFile<Context<E>> *mf,
                       std::string archive_name) {
   ObjectFile<E> *obj = new ObjectFile<E>(mf);
   obj->archive_name = archive_name;
-  obj->is_alive = archive_name.empty() || ctx.all_load;
-  obj->is_hidden = ctx.hidden_l;
+  obj->is_alive = archive_name.empty() || ctx.reader.all_load;
+  obj->is_hidden = ctx.reader.hidden;
   ctx.obj_pool.emplace_back(obj);
   return obj;
 };
@@ -1365,13 +1365,13 @@ template <typename E>
 DylibFile<E>::DylibFile(Context<E> &ctx, MappedFile<Context<E>> *mf)
     : InputFile<E>(mf) {
   this->is_dylib = true;
-  this->is_weak = ctx.weak_l;
-  this->is_reexported = ctx.reexport_l;
+  this->is_weak = ctx.reader.weak;
+  this->is_reexported = ctx.reader.reexport;
 
   // Even if -dead_strip was not given, a dylib with
   // MH_DEAD_STRIPPABLE_DYLIB is dead-stripped if unreferenced.
   bool dead_strippable = ctx.arg.dead_strip_dylibs || is_dead_strippable(ctx, mf);
-  this->is_alive = ctx.needed_l || !dead_strippable;
+  this->is_alive = ctx.reader.needed || !dead_strippable;
 }
 
 template <typename E>

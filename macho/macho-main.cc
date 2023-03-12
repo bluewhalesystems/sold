@@ -1057,12 +1057,12 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
     }
 
     if (opt == "-all_load") {
-      ctx.all_load = true;
+      ctx.reader.all_load = true;
       continue;
     }
 
     if (opt == "-noall_load") {
-      ctx.all_load = false;
+      ctx.reader.all_load = false;
       continue;
     }
 
@@ -1071,6 +1071,7 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
 
     const std::string &arg = args[0];
     args = args.subspan(1);
+    ReaderContext orig = ctx.reader;
 
     if (opt == "-filelist") {
       for (std::string &path : read_filelist(ctx, arg)) {
@@ -1080,43 +1081,38 @@ static void read_input_files(Context<E> &ctx, std::span<std::string> args) {
         read_file(ctx, mf);
       }
     } else if (opt == "-force_load") {
-      bool orig = ctx.all_load;
-      ctx.all_load = true;
+      ctx.reader.all_load = true;
       read_file(ctx, MappedFile<Context<E>>::must_open(ctx, arg));
-      ctx.all_load = orig;
     } else if (opt == "-framework") {
       read_framework(arg);
     } else if (opt == "-needed_framework") {
-      ctx.needed_l = true;
+      ctx.reader.needed = true;
       read_framework(arg);
     } else if (opt == "-weak_framework") {
-      ctx.weak_l = true;
+      ctx.reader.weak = true;
       read_framework(arg);
     } else if (opt == "-l") {
       read_library(arg);
     } else if (opt == "-needed-l") {
-      ctx.needed_l = true;
+      ctx.reader.needed = true;
       read_library(arg);
     } else if (opt == "-hidden-l") {
-      ctx.hidden_l = true;
+      ctx.reader.hidden = true;
       read_library(arg);
     } else if (opt == "-weak-l") {
-      ctx.weak_l = true;
+      ctx.reader.weak = true;
       read_library(arg);
     } else if (opt == "-reexport-l") {
-      ctx.reexport_l = true;
+      ctx.reader.reexport = true;
       read_library(arg);
     } else if (opt == "-reexport_library") {
-      ctx.reexport_l = true;
+      ctx.reader.reexport = true;
       read_file(ctx, MappedFile<Context<E>>::must_open(ctx, arg));
     } else {
       unreachable();
     }
 
-    ctx.needed_l = false;
-    ctx.hidden_l = false;
-    ctx.weak_l = false;
-    ctx.reexport_l = false;
+    ctx.reader = orig;
   }
 
   // With -bundle_loader, we can import symbols from a main executable.

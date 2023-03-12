@@ -1052,6 +1052,14 @@ struct SectCreateOption {
   std::string_view filename;
 };
 
+struct ReaderContext {
+  bool all_load = false;
+  bool needed = false;
+  bool hidden = false;
+  bool weak = false;
+  bool reexport = false;
+};
+
 template <typename E>
 struct Context {
   Context() {
@@ -1159,15 +1167,11 @@ struct Context {
     std::vector<std::string> u;
   } arg;
 
+  ReaderContext reader;
   std::vector<std::string_view> cmdline_args;
   tbb::task_group tg;
   u32 output_type = MH_EXECUTE;
   i64 file_priority = 10000;
-  bool all_load = false;
-  bool needed_l = false;
-  bool hidden_l = false;
-  bool weak_l = false;
-  bool reexport_l = false;
   std::set<std::string> missing_files; // for -dependency_info
 
   u8 uuid[16] = {};
