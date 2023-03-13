@@ -464,6 +464,9 @@ int elf_main(int argc, char **argv) {
   // put together in a single phase.
   resolve_symbols(ctx);
 
+  // "Kill" .eh_frame input sections after symbol resolution.
+  kill_eh_frame_sections(ctx);
+
   // Resolve mergeable section pieces to merge them.
   resolve_section_pieces(ctx);
 
@@ -739,6 +742,7 @@ int elf_main(int argc, char **argv) {
 using E = MOLD_TARGET;
 
 template void read_file(Context<E> &, MappedFile<Context<E>> *);
+template MappedFile<Context<E>> *open_library(Context<E> &, std::string);
 
 #ifdef MOLD_X86_64
 
