@@ -57,19 +57,22 @@ static bool contains(const std::vector<YamlNode> &vec, std::string_view key) {
   return false;
 }
 
-static bool match_arch(const std::vector<YamlNode> &vec, std::string_view arch) {
+template <typename E>
+static bool match_arch(Context<E> &ctx, const std::vector<YamlNode> &vec) {
+  static_assert(is_arm<E> || is_x86<E>);
+  std::string arch = is_arm<E> ? "arm64" : "x86_64";
+
   for (const YamlNode &mem : vec)
     if (auto val = std::get_if<std::string_view>(&mem.data))
-      if (*val == arch || val->starts_with(std::string(arch) + "-"))
+      if (*val == arch || val->starts_with(arch + "-"))
         return true;
   return false;
 }
 
 template <typename E>
 static std::optional<TextDylib>
-to_tbd(Context<E> &ctx, YamlNode &node, std::string_view arch,
-       std::string_view filename) {
-  if (!match_arch(get_vector(node, "targets"), arch))
+to_tbd(Context<E> &ctx, YamlNode &node, std::string_view filename) {
+  if (!match_arch(ctx, get_vector(node, "targets")))
     return {};
 
   if (ctx.arg.application_extension &&
@@ -83,7 +86,7 @@ to_tbd(Context<E> &ctx, YamlNode &node, std::string_view arch,
     tbd.install_name = *val;
 
   for (YamlNode &mem : get_vector(node, "reexported-libraries"))
-    if (match_arch(get_vector(mem, "targets"), arch))
+    if (match_arch(ctx, get_vector(mem, "targets")))
       append(tbd.reexported_libs, get_string_vector(mem, "libraries"));
 
   auto concat = [&](const std::string &x, std::string_view y) {
@@ -92,7 +95,7 @@ to_tbd(Context<E> &ctx, YamlNode &node, std::string_view arch,
 
   for (std::string_view key : {"exports", "reexports"}) {
     for (YamlNode &mem : get_vector(node, key)) {
-      if (match_arch(get_vector(mem, "targets"), arch)) {
+      if (match_arch(ctx, get_vector(mem, "targets"))) {
         merge(tbd.exports, get_string_vector(mem, "symbols"));
         merge(tbd.weak_exports, get_string_vector(mem, "weak-symbols"));
 
@@ -214,10 +217,6 @@ interpret_ld_symbols(Context<E> &ctx, TextDylib &tbd, std::string_view filename)
   tbd.exports = std::move(syms);
 }
 
-template <typename E>
-static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
-                       std::string_view arch);
-
 // A single YAML file may contain multiple text dylibs. The first text
 // dylib is the main file followed by optional other text dylibs for
 // re-exported libraries.
@@ -225,8 +224,7 @@ static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
 // This fucntion squashes multiple text dylibs into a single text dylib
 // by copying symbols of re-exported text dylibs to the main text dylib.
 template <typename E>
-static TextDylib
-squash(Context<E> &ctx, std::span<TextDylib> tbds, std::string_view arch) {
+static TextDylib squash(Context<E> &ctx, std::span<TextDylib> tbds) {
   std::unordered_map<std::string_view, TextDylib> map;
   std::vector<std::string_view> remainings;
 
@@ -267,8 +265,7 @@ static std::string_view replace_crlf(Context<E> &ctx, std::string_view str) {
 }
 
 template <typename E>
-static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
-                       std::string_view arch) {
+TextDylib parse_tbd(Context<E> &ctx, MappedFile<Context<E>> *mf) {
   std::string_view contents = mf->get_contents();
   contents = replace_crlf(ctx, contents);
 
@@ -286,23 +283,13 @@ static TextDylib parse(Context<E> &ctx, MappedFile<Context<E>> *mf,
 
   std::vector<TextDylib> vec;
   for (YamlNode &node : nodes)
-    if (std::optional<TextDylib> dylib = to_tbd(ctx, node, arch, mf->name))
+    if (std::optional<TextDylib> dylib = to_tbd(ctx, node, mf->name))
       vec.push_back(*dylib);
 
   for (TextDylib &tbd : vec)
     interpret_ld_symbols(ctx, tbd, mf->name);
 
-  return squash(ctx, vec, arch);
-}
-
-template <typename E>
-TextDylib parse_tbd(Context<E> &ctx, MappedFile<Context<E>> *mf) {
-  if constexpr (is_arm<E>) {
-    return parse(ctx, mf, "arm64");
-  } else {
-    static_assert(is_x86<E>);
-    return parse(ctx, mf, "x86_64");
-  }
+  return squash(ctx, vec);
 }
 
 using E = MOLD_TARGET;
