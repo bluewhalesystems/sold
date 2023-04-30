@@ -104,6 +104,7 @@ Options:
   -random_uuid                Generate a random LC_UUID load command
   -reexport-l<LIB>            Search for a given library and reexport it
   -reexport_library <FILE>    Reexport a given library
+  -reproducible               Generate a reproducible output (default)
   -rpath <PATH>               Add PATH to the runpath search path list
   -search_dylibs_first
   -search_paths_first
@@ -509,6 +510,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_arg("-reexport_library")) {
       remaining.push_back("-reexport_library");
       remaining.push_back(std::string(arg));
+    } else if (read_flag("-reproducible")) {
     } else if (read_arg("-rpath")) {
       ctx.arg.rpaths.push_back(std::string(arg));
     } else if (read_flag("-search_paths_first")) {
