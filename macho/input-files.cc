@@ -104,6 +104,9 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
 
   if (mod_init_func)
     parse_mod_init_func(ctx);
+
+  if (debug_info)
+    source_name = get_source_filename(ctx, *this);
 }
 
 template <typename E>
@@ -118,6 +121,7 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
 
   for (i64 i = 0; i < cmd->nsects; i++) {
     MachSection<E> &msec = mach_sec[i];
+    u8 *contents = (u8 *)(this->mf->get_contents().data() + msec.offset);
 
     if (msec.match("__LD", "__compact_unwind")) {
       unwind_sec = &msec;
@@ -135,8 +139,7 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
       if (msec.size != sizeof(ObjcImageInfo))
         Fatal(ctx) << *this << ": __objc_imageinfo: invalid size";
 
-      objc_image_info =
-        (ObjcImageInfo *)(this->mf->get_contents().data() + msec.offset);
+      objc_image_info = (ObjcImageInfo *)contents;
 
       if (objc_image_info->version != 0)
         Fatal(ctx) << *this << ": __objc_imageinfo: unknown version: "
@@ -150,7 +153,13 @@ void ObjectFile<E>::parse_sections(Context<E> &ctx) {
     }
 
     if (msec.match("__DWARF", "__debug_info"))
-      has_debug_info = true;
+      debug_info = contents;
+    if (msec.match("__DWARF", "__debug_abbrev"))
+      debug_abbrev = contents;
+    if (msec.match("__DWARF", "__debug_str"))
+      debug_str = contents;
+    if (msec.match("__DWARF", "__debug_line"))
+      debug_line = contents;
 
     if (msec.get_segname() == "__LLVM" || (msec.attr & S_ATTR_DEBUG))
       continue;
@@ -1207,7 +1216,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
   // and read debug info from object files.
   //
   // Debug symbols are called "stab" symbols.
-  bool emit_debug_syms = has_debug_info && !ctx.arg.S;
+  bool emit_debug_syms = debug_info && !ctx.arg.S;
 
   if (emit_debug_syms) {
     this->oso_name = get_oso_name();
@@ -1215,6 +1224,7 @@ void ObjectFile<E>::compute_symtab_size(Context<E> &ctx) {
         this->oso_name.starts_with(ctx.arg.oso_prefix))
       this->oso_name = this->oso_name.substr(ctx.arg.oso_prefix.size());
 
+    this->strtab_size += this->source_name.size() + 1;
     this->strtab_size += this->oso_name.size() + 1;
     this->num_stabs = 3;
   }
@@ -1268,11 +1278,7 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   // marks a start of a new object file.
   //
   // The first N_SO symbol is intended to have a source filename (e.g.
-  // path/too/foo.cc), but it looks like lldb doesn't actually use that
-  // symbol name. Souce filename is in the debug record and thus naturally
-  // lldb can read it, so it doesn't make much sense to parse a debug
-  // record just to set a source filename which will be ignored. So, we
-  // always set a dummy name "-" as a filename.
+  // path/too/foo.cc).
   //
   // The following N_OSO symbol specifies a object file path, which is
   // followed by N_FUN, N_STSYM or N_GSYM symbols for functions,
@@ -1284,12 +1290,13 @@ void ObjectFile<E>::populate_symtab(Context<E> &ctx) {
   //
   // At the end of stab symbols, we have a N_SO symbol without symbol name
   // as an end marker.
-  if (has_debug_info && !ctx.arg.S) {
+  if (debug_info && !ctx.arg.S) {
     MachSym<E> *stab = buf + this->stabs_offset;
     i64 stab_idx = 2;
 
-    stab[0].stroff = 2; // string "-"
+    stab[0].stroff = stroff;
     stab[0].n_type = N_SO;
+    stroff += write_string(strtab + stroff, this->source_name);
 
     stab[1].stroff = stroff;
     stab[1].n_type = N_OSO;

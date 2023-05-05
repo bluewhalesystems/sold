@@ -412,6 +412,112 @@ enum : u32 {
   X86_64_RELOC_TLV = 9,
 };
 
+//
+// DWARF data types
+//
+
+enum : u32 {
+  DW_EH_PE_absptr = 0,
+  DW_EH_PE_omit = 0xff,
+  DW_EH_PE_uleb128 = 0x01,
+  DW_EH_PE_udata2 = 0x02,
+  DW_EH_PE_udata4 = 0x03,
+  DW_EH_PE_udata8 = 0x04,
+  DW_EH_PE_signed = 0x08,
+  DW_EH_PE_sleb128 = 0x09,
+  DW_EH_PE_sdata2 = 0x0a,
+  DW_EH_PE_sdata4 = 0x0b,
+  DW_EH_PE_sdata8 = 0x0c,
+  DW_EH_PE_pcrel = 0x10,
+  DW_EH_PE_textrel = 0x20,
+  DW_EH_PE_datarel = 0x30,
+  DW_EH_PE_funcrel = 0x40,
+  DW_EH_PE_aligned = 0x50,
+};
+
+enum : u32 {
+  DW_AT_name = 0x3,
+  DW_AT_low_pc = 0x11,
+  DW_AT_high_pc = 0x12,
+  DW_AT_producer = 0x25,
+  DW_AT_ranges = 0x55,
+  DW_AT_addr_base = 0x73,
+  DW_AT_rnglists_base = 0x74,
+};
+
+enum : u32 {
+  DW_TAG_compile_unit = 0x11,
+  DW_TAG_skeleton_unit = 0x4a,
+};
+
+enum : u32 {
+  DW_UT_compile = 0x01,
+  DW_UT_partial = 0x03,
+  DW_UT_skeleton = 0x04,
+  DW_UT_split_compile = 0x05,
+};
+
+enum : u32 {
+  DW_FORM_addr = 0x01,
+  DW_FORM_block2 = 0x03,
+  DW_FORM_block4 = 0x04,
+  DW_FORM_data2 = 0x05,
+  DW_FORM_data4 = 0x06,
+  DW_FORM_data8 = 0x07,
+  DW_FORM_string = 0x08,
+  DW_FORM_block = 0x09,
+  DW_FORM_block1 = 0x0a,
+  DW_FORM_data1 = 0x0b,
+  DW_FORM_flag = 0x0c,
+  DW_FORM_sdata = 0x0d,
+  DW_FORM_strp = 0x0e,
+  DW_FORM_udata = 0x0f,
+  DW_FORM_ref_addr = 0x10,
+  DW_FORM_ref1 = 0x11,
+  DW_FORM_ref2 = 0x12,
+  DW_FORM_ref4 = 0x13,
+  DW_FORM_ref8 = 0x14,
+  DW_FORM_ref_udata = 0x15,
+  DW_FORM_indirect = 0x16,
+  DW_FORM_sec_offset = 0x17,
+  DW_FORM_exprloc = 0x18,
+  DW_FORM_flag_present = 0x19,
+  DW_FORM_strx = 0x1a,
+  DW_FORM_addrx = 0x1b,
+  DW_FORM_ref_sup4 = 0x1c,
+  DW_FORM_strp_sup = 0x1d,
+  DW_FORM_data16 = 0x1e,
+  DW_FORM_line_strp = 0x1f,
+  DW_FORM_ref_sig8 = 0x20,
+  DW_FORM_implicit_const = 0x21,
+  DW_FORM_loclistx = 0x22,
+  DW_FORM_rnglistx = 0x23,
+  DW_FORM_ref_sup8 = 0x24,
+  DW_FORM_strx1 = 0x25,
+  DW_FORM_strx2 = 0x26,
+  DW_FORM_strx3 = 0x27,
+  DW_FORM_strx4 = 0x28,
+  DW_FORM_addrx1 = 0x29,
+  DW_FORM_addrx2 = 0x2a,
+  DW_FORM_addrx3 = 0x2b,
+  DW_FORM_addrx4 = 0x2c,
+};
+
+enum : u32 {
+  DW_RLE_end_of_list = 0x00,
+  DW_RLE_base_addressx = 0x01,
+  DW_RLE_startx_endx = 0x02,
+  DW_RLE_startx_length = 0x03,
+  DW_RLE_offset_pair = 0x04,
+  DW_RLE_base_address = 0x05,
+  DW_RLE_start_end = 0x06,
+  DW_RLE_start_length = 0x07,
+};
+
+//
+// Mach-O types
+//
+
 template <>
 inline std::string rel_to_string<ARM64>(u8 type) {
   switch (type) {

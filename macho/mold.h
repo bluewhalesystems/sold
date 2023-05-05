@@ -206,6 +206,12 @@ public:
   ObjcImageInfo *objc_image_info = nullptr;
   LTOModule *lto_module = nullptr;
 
+  std::string_view source_name;
+  u8 *debug_info = nullptr;
+  u8 *debug_abbrev = nullptr;
+  u8 *debug_str = nullptr;
+  u8 *debug_line = nullptr;
+
   // For __init_offsets
   MachSection<E> *mod_init_func = nullptr;
   std::vector<Symbol<E> *> init_functions;
@@ -234,7 +240,6 @@ private:
   MachSection<E> *unwind_sec = nullptr;
   std::unique_ptr<MachSection<E>> common_hdr;
   InputSection<E> *common_sec = nullptr;
-  bool has_debug_info = false;
 
   std::vector<std::unique_ptr<Subsection<E>>> subsec_pool;
   std::vector<std::unique_ptr<MachSection<E>>> mach_sec_pool;
@@ -696,7 +701,7 @@ public:
   i64 globals_offset = 0;
   i64 undefs_offset = 0;
 
-  static constexpr std::string_view strtab_init_image = " \0-\0"sv;
+  static constexpr std::string_view strtab_init_image = " \0"sv;
 };
 
 template <typename E>
@@ -945,6 +950,13 @@ public:
 
   std::string_view contents;
 };
+
+//
+// dwarf.cc
+//
+
+template <typename E>
+std::string_view get_source_filename(Context<E> &ctx, ObjectFile<E> &file);
 
 //
 // mapfile.cc
