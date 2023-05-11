@@ -713,7 +713,6 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
   for (FdeRecord<E> &fde : fdes)
     fde.parse(ctx);
 
-  // Associate relocations to CIEs
   MachRel *mach_rels = (MachRel *)(this->mf->data + eh_frame_sec->reloff);
 
   auto find_cie = [&](u32 input_addr) -> CieRecord<E> * {

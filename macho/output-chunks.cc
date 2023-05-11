@@ -1928,8 +1928,12 @@ encode_unwind_info(Context<E> &ctx, std::vector<Symbol<E> *> personalities,
 
   // Write the personalities
   ul32 *per = (ul32 *)(buf.data() + sizeof(uhdr));
-  for (Symbol<E> *sym : personalities)
-    *per++ = sym->get_got_addr(ctx);
+  for (Symbol<E> *sym : personalities) {
+    if (sym->file)
+      *per++ = sym->get_got_addr(ctx);
+    else
+      Error(ctx) << "undefined symbol: " << *sym;
+  }
 
   // Write first level pages, LSDA and second level pages
   UnwindFirstLevelPage *page1 = (UnwindFirstLevelPage *)per;
@@ -2185,6 +2189,11 @@ void CieRecord<E>::copy_to(Context<E> &ctx) {
   memcpy(buf + output_offset, data.data(), data.size());
 
   if (personality) {
+    if (!personality->file) {
+      Error(ctx) << "undefined symbol: " << *file << ": " << *personality;
+      return;
+    }
+
     i64 offset = output_offset + personality_offset;
     *(ul32 *)(buf + offset) =
       personality->get_got_addr(ctx) - (ctx.eh_frame.hdr.addr + offset);
