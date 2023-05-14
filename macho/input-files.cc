@@ -682,7 +682,7 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
 
     u32 id = *(ul32 *)(data.data() + 4);
     if (id == 0) {
-      cies.push_back(CieRecord<E>{
+      cies.emplace_back(new CieRecord<E>{
         .file = this,
         .input_addr = (u32)(eh_frame_sec->addr + offset),
       });
@@ -708,17 +708,18 @@ void ObjectFile<E>::parse_eh_frame(Context<E> &ctx) {
     return a.subsec->input_addr < b.subsec->input_addr;
   });
 
-  for (CieRecord<E> &cie : cies)
-    cie.parse(ctx);
+  for (std::unique_ptr<CieRecord<E>> &cie : cies)
+    cie->parse(ctx);
   for (FdeRecord<E> &fde : fdes)
     fde.parse(ctx);
 
   MachRel *mach_rels = (MachRel *)(this->mf->data + eh_frame_sec->reloff);
 
   auto find_cie = [&](u32 input_addr) -> CieRecord<E> * {
-    for (CieRecord<E> &cie : cies)
-      if (cie.input_addr <= input_addr && input_addr < cie.input_addr + cie.size())
-        return &cie;
+    for (std::unique_ptr<CieRecord<E>> &cie : cies)
+      if (cie->input_addr <= input_addr &&
+          input_addr < cie->input_addr + cie->size())
+        return &*cie;
     Fatal(ctx) << *this << ": __eh_frame: unexpected relocation offset";
   };
 

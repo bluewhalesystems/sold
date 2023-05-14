@@ -2157,19 +2157,44 @@ void ThreadPtrsSection<E>::copy_buf(Context<E> &ctx) {
 // Parse CIE augmented string
 template <typename E>
 void CieRecord<E>::parse(Context<E> &ctx) {
-  std::string_view aug = get_contents().data() + 9;
+  u8 *aug = (u8 *)get_contents().data() + 9;
+  if (*aug != 'z')
+    return;
 
-  for (char c : aug) {
-    switch (c) {
-    case 'L':
-      has_lsda = true;
+  u8 *data = aug + strlen((char *)aug) + 1;
+  read_uleb(data); // code alignment
+  read_uleb(data); // data alignment
+  read_uleb(data); // return address register
+  read_uleb(data); // augmentation data length
+
+  for (i64 i = 1; aug[i]; i++) {
+    switch (aug[i]) {
+    case 'L': {
+      if ((*data & 0xf) == DW_EH_PE_sdata4)
+        lsda_size = 4;
+      else if ((*data & 0xf) == DW_EH_PE_absptr)
+        lsda_size = 8;
+      else
+        Fatal(ctx) << *file << ": __eh_frame: unknown LSDA encoding: 0x"
+                   << std::hex << (u32)*data;
+      data++;
       break;
-    case 'z':
+    }
     case 'P':
+      if (*data != (DW_EH_PE_pcrel | DW_EH_PE_indirect | DW_EH_PE_sdata4))
+        Fatal(ctx) << *file << ": __eh_frame: unknown personality encoding: 0x"
+                   << std::hex << (u32)*data;
+      data += 4;
+      break;
     case 'R':
+      if ((*data & 0xf) != DW_EH_PE_absptr || !(*data & DW_EH_PE_pcrel))
+        Fatal(ctx) << *file << ": __eh_frame: unknown pointer encoding: 0x"
+                   << std::hex << (u32)*data;
+      data++;
       break;
     default:
-      Fatal(ctx) << file << ": __eh_frame: unknown augmented string: " << aug;
+      Fatal(ctx) << *file << ": __eh_frame: unknown augmented string: "
+                 << (char *)aug;
     }
   }
 }
@@ -2205,9 +2230,9 @@ void FdeRecord<E>::parse(Context<E> &ctx) {
   ObjectFile<E> &file = subsec->isec->file;
 
   auto find_cie = [&](u32 addr) {
-    for (CieRecord<E> &cie : file.cies)
-      if (cie.input_addr == addr)
-        return &cie;
+    for (std::unique_ptr<CieRecord<E>> &cie : file.cies)
+      if (cie->input_addr == addr)
+        return &*cie;
     Fatal(ctx) << file << ": cannot find a CIE for a FDE at address 0x"
                << std::hex << input_addr;
   };
@@ -2218,7 +2243,7 @@ void FdeRecord<E>::parse(Context<E> &ctx) {
   cie = find_cie(input_addr + 4 - cie_offset);
 
   // Initialize lsda
-  if (cie->has_lsda) {
+  if (cie->lsda_size) {
     u8 *buf = (u8 *)get_contents().data();
     u8 *aug = buf + 24;
     read_uleb(aug); // skip Augmentation Data Length
@@ -2262,9 +2287,15 @@ void FdeRecord<E>::copy_to(Context<E> &ctx) {
 
     i64 offset = aug - buf;
     u64 addr = *(ul32 *)aug + input_addr + offset;
+    i64 val = lsda->get_addr(ctx) - output_addr - offset +
+              addr - lsda->input_addr;
 
-    *(ul32 *)aug = lsda->get_addr(ctx) - output_addr - offset +
-                   addr - lsda->input_addr;
+    if (cie->lsda_size == 4) {
+      *(ul32 *)aug = val;
+    } else {
+      assert(cie->lsda_size == 8);
+      *(ul64 *)aug = val;
+    }
   }
 }
 
@@ -2279,17 +2310,17 @@ void EhFrameSection<E>::compute_size(Context<E> &ctx) {
     for (FdeRecord<E> &fde : file->fdes)
       fde.cie->is_alive = true;
 
-    std::erase_if(file->cies, [](CieRecord<E> &cie) {
-      return !cie.is_alive;
+    std::erase_if(file->cies, [](std::unique_ptr<CieRecord<E>> &cie) {
+      return !cie->is_alive;
     });
   });
 
   i64 offset = 0;
 
   for (ObjectFile<E> *file : ctx.objs) {
-    for (CieRecord<E> &cie : file->cies) {
-      cie.output_offset = offset;
-      offset += cie.size();
+    for (std::unique_ptr<CieRecord<E>> &cie : file->cies) {
+      cie->output_offset = offset;
+      offset += cie->size();
     }
 
     for (FdeRecord<E> &fde : file->fdes) {
@@ -2304,8 +2335,8 @@ void EhFrameSection<E>::compute_size(Context<E> &ctx) {
 template <typename E>
 void EhFrameSection<E>::copy_buf(Context<E> &ctx) {
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    for (CieRecord<E> &cie : file->cies)
-      cie.copy_to(ctx);
+    for (std::unique_ptr<CieRecord<E>> &cie : file->cies)
+      cie->copy_to(ctx);
 
     for (FdeRecord<E> &fde : file->fdes)
       fde.copy_to(ctx);

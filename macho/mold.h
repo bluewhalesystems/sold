@@ -110,7 +110,7 @@ struct CieRecord {
   u32 input_addr = 0;
   u32 personality_offset = 0;
   u32 output_offset = (u32)-1;
-  bool has_lsda = false;
+  u8 lsda_size = 0;
   bool is_alive = false;
 };
 
@@ -200,7 +200,7 @@ public:
   std::span<MachSym<E>> mach_syms;
   std::vector<Symbol<E>> local_syms;
   std::vector<UnwindRecord<E>> unwind_records;
-  std::vector<CieRecord<E>> cies;
+  std::vector<std::unique_ptr<CieRecord<E>>> cies;
   std::vector<FdeRecord<E>> fdes;
   MachSection<E> *eh_frame_sec = nullptr;
   ObjcImageInfo *objc_image_info = nullptr;

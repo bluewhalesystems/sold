@@ -39,8 +39,8 @@ static void collect_root_set(Context<E> &ctx,
           hdr.type == S_MOD_TERM_FUNC_POINTERS)
         rootset.push_back(subsec);
 
-    for (CieRecord<E> &cie : file->cies)
-      add(cie.personality);
+    for (std::unique_ptr<CieRecord<E>> &cie : file->cies)
+      add(cie->personality);
   });
 
   for (std::string_view name : ctx.arg.u)

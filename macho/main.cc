@@ -712,9 +712,9 @@ static void scan_relocations(Context<E> &ctx) {
           rec.personality->flags |= NEEDS_GOT;
     }
 
-    for (CieRecord<E> &cie : file->cies)
-      if (cie.personality)
-        cie.personality->flags |= NEEDS_GOT;
+    for (std::unique_ptr<CieRecord<E>> &cie : file->cies)
+      if (cie->personality)
+        cie->personality->flags |= NEEDS_GOT;
   });
 
   std::vector<InputFile<E> *> files;
