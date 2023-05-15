@@ -317,7 +317,6 @@ list(APPEND MOLD_MACHO_TEMPLATE_FILES
   macho/arch-arm64.cc
   macho/cmdline.cc
   macho/dead-strip.cc
-  macho/dwarf.cc
   macho/input-files.cc
   macho/input-sections.cc
   macho/lto.cc
