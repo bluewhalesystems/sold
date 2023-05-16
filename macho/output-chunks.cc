@@ -2184,7 +2184,7 @@ void CieRecord<E>::parse(Context<E> &ctx) {
       if (*data != (DW_EH_PE_pcrel | DW_EH_PE_indirect | DW_EH_PE_sdata4))
         Fatal(ctx) << *file << ": __eh_frame: unknown personality encoding: 0x"
                    << std::hex << (u32)*data;
-      data += 4;
+      data += 5;
       break;
     case 'R':
       if ((*data & 0xf) != DW_EH_PE_absptr || !(*data & DW_EH_PE_pcrel))
