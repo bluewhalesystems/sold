@@ -18,6 +18,9 @@ static const char helpmsg[] = R"(
 Sold-specific options:
   --print-dependencies        Print input file dependency information
 
+lld-compatible options:
+  --strict-auto-link          Ignored
+
 Options:
   -F<PATH>                    Add DIR to framework search path
   -L<PATH>                    Add DIR to library search path
@@ -336,6 +339,7 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
 
     if (read_flag("--print-dependencies")) {
       ctx.arg.print_dependencies = true;
+    } else if (read_flag("--strict-auto-link")) {
     } else if (read_joined("-F")) {
       framework_paths.push_back(std::string(arg));
     } else if (read_joined("-L")) {
