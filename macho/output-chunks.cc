@@ -1118,6 +1118,7 @@ void FunctionStartsSection<E>::compute_size(Context<E> &ctx) {
 
   std::vector<u64> addrs = flatten(vec);
   tbb::parallel_sort(addrs.begin(), addrs.end());
+  remove_duplicates(addrs);
 
   // We need a NUL terminator at the end. We also want to make sure that
   // the size is a multiple of 8 because the `strip` command assumes that
