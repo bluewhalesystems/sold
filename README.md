@@ -2,7 +2,7 @@
 
 _sold_ is the commercial version of the
 [mold](https://github.com/rui314/mold) linker. Unlike the mold linker whose
-license is AGPL, the sold linker is available under an ordinary, per-user,
+license is MIT, the sold linker is available under an ordinary, per-user,
 per-month/year commercial license. sold is a superset of mold; in addition
 to all the mold's features, sold supports macOS/iOS.
 
