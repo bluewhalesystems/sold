@@ -1,4 +1,4 @@
-# sold: The commercial version of the mold linker
+# sold linker
 
 _sold_ is a fork of [mold](https://github.com/rui314/mold) that supports
 not only Linux but also macOS/iOS. Originally, _sold_ was available under
@@ -23,6 +23,4 @@ sold is installed under several different executable names as follows:
    linker on macOS by adding `--ld-path=path/to/ld64.sold` to the linker flags.
 
 3. `ld.mold` and `ld64.mold`: They are just aliases for `ld.sold` and
-   `ld64.sold`, respectively, so that you don't have to change the linker name
-   in your build system from `mold` to `sold` after purchasing a commercial
-   license.
+   `ld64.sold`, respectively.
