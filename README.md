@@ -1,14 +1,8 @@
 # sold: The commercial version of the mold linker
 
-_sold_ is the commercial version of the
-[mold](https://github.com/rui314/mold) linker. Unlike the mold linker whose
-license is AGPL, the sold linker is available under an ordinary, per-user,
-per-month/year commercial license. sold is a superset of mold; in addition
-to all the mold's features, sold supports macOS/iOS.
-
-Please see the [End User Agreement License](LICENSE.md) for the details about
-licensing terms. You can purchase a subscription or obtain an evaluation
-license at [our website](https://bluewhale.systems).
+_sold_ is a fork of [mold](https://github.com/rui314/mold) that supports
+not only Linux but also macOS/iOS. Originally, _sold_ was available under
+a commercial license. Now, it has been relicensed under the MIT license.
 
 ## How to build
 
