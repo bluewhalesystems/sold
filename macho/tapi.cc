@@ -72,8 +72,16 @@ static bool match_arch(Context<E> &ctx, const std::vector<YamlNode> &vec) {
 template <typename E>
 static std::optional<TextDylib>
 to_tbd(Context<E> &ctx, YamlNode &node, std::string_view filename) {
-  if (!match_arch(ctx, get_vector(node, "targets")))
+  // Before v4 of .tbd, the key is actually "archs" instead of "targets".
+  // There are other differences, and detection should be done through tags,
+  // however there's little benefit and needless overhead.
+  const char* targets_key = "targets";
+  if (!match_arch(ctx, get_vector(node, targets_key))) {
+    targets_key = "archs";
+  }
+  if (!match_arch(ctx, get_vector(node, targets_key))) {
     return {};
+  }
 
   if (ctx.arg.application_extension &&
       contains(get_vector(node, "flags"), "not_app_extension_safe"))
@@ -86,7 +94,7 @@ to_tbd(Context<E> &ctx, YamlNode &node, std::string_view filename) {
     tbd.install_name = *val;
 
   for (YamlNode &mem : get_vector(node, "reexported-libraries"))
-    if (match_arch(ctx, get_vector(mem, "targets")))
+    if (match_arch(ctx, get_vector(mem, targets_key)))
       append(tbd.reexported_libs, get_string_vector(mem, "libraries"));
 
   auto concat = [&](const std::string &x, std::string_view y) {
@@ -95,7 +103,7 @@ to_tbd(Context<E> &ctx, YamlNode &node, std::string_view filename) {
 
   for (std::string_view key : {"exports", "reexports"}) {
     for (YamlNode &mem : get_vector(node, key)) {
-      if (match_arch(ctx, get_vector(mem, "targets"))) {
+      if (match_arch(ctx, get_vector(mem, targets_key))) {
         merge(tbd.exports, get_string_vector(mem, "symbols"));
         merge(tbd.weak_exports, get_string_vector(mem, "weak-symbols"));
 
