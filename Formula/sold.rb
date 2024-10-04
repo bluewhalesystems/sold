@@ -6,10 +6,11 @@ class Sold < Formula
 
 
   depends_on "cmake" => :build
+  depends_on "ninja" => :build
+  depends_on "blake3"
   depends_on "tbb"
   depends_on "zstd"
   uses_from_macos "zlib"
-  depends_on "blake3"
 
   on_macos do
     depends_on "llvm" => :build if DevelopmentTools.clang_build_version <= 1200
@@ -36,7 +37,7 @@ class Sold < Formula
     # This helps make the bottle relocatable.
     inreplace "common/config.h.in", "@CMAKE_INSTALL_FULL_LIBDIR@", ""
     # Ensure we're using Homebrew-provided versions of these dependencies.
-    %w[blake3 mimalloc tbb zlib zstd].each { |dir| rm_r(buildpath/"third-party"/dir) }
+    %w[blake3 mimalloc tbb zlib zstd].each { |dir| rm_rf(buildpath/"third-party"/dir) }
     args = %w[
       -DMOLD_LTO=ON
       -DMOLD_USE_MIMALLOC=ON
@@ -45,7 +46,7 @@ class Sold < Formula
       -DCMAKE_SKIP_INSTALL_RULES=OFF
     ]
 
-    system "cmake", "-S", ".", "-B", "build", *args, *std_cmake_args
+    system "cmake", "-S", ".", "-B", "build", "-G", "Ninja", *args, *std_cmake_args
     system "cmake", "--build", "build"
     system "cmake", "--install", "build"
 
