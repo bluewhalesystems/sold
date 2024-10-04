@@ -6,10 +6,10 @@ class Sold < Formula
 
 
   depends_on "cmake" => :build
-  depends_on "blake3"
   depends_on "tbb"
   depends_on "zstd"
   uses_from_macos "zlib"
+  depends_on "blake3"
 
   on_macos do
     depends_on "llvm" => :build if DevelopmentTools.clang_build_version <= 1200
