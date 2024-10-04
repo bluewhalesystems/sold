@@ -1,6 +1,8 @@
 class Sold < Formula
   desc "Modern Linker"
   homepage "https://github.com/bluewhalesystems/sold.git"
+  url "https://codeload.github.com/jmcken8/sold/tar.gz/refs/tags/2.33.0-0"
+  sha256 "6e8176c8d33b953f47f87792f5b0b86038081486ec734a08f962538c70fdf451"
   head 'git@github.com:jmcken8/sold.git', :using => :git, :branch => "main"
   license "MIT"
 
