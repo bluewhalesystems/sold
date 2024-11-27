@@ -1403,7 +1403,7 @@ template <typename E>
 static MappedFile<Context<E>> *
 find_external_lib(Context<E> &ctx, DylibFile<E> &loader, std::string path) {
   auto find = [&](std::string path) -> MappedFile<Context<E>> * {
-    if (!path.starts_with('/'))
+    if (path.starts_with('/'))
       return MappedFile<Context<E>>::open(ctx, path);
 
     for (const std::string &root : ctx.arg.syslibroot) {
