@@ -574,6 +574,8 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
       ctx.arg.x = true;
     } else if (read_flag("--no-call-graph-profile-sort")) {
     } else if (read_flag("--icf=none")) {
+    } else if (read_flag("-no_warn_duplicate_libraries")) {
+    } else if (read_flag("-dead_strip")) {
     } else {
       if (args[i][0] == '-')
         Fatal(ctx) << "unknown command line option: " << args[i];
