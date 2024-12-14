@@ -87,6 +87,8 @@ Options:
   -l<LIB>                     Search for a given library
   -lto_library <FILE>         Load a LTO linker plugin library
   -macos_version_min <VERSION>
+  -ios_version_min <VERSION>
+  -iphoneos_version_min <VERSION>
   -map <FILE>                 Write map file to a given file
   -mark_dead_strippable_dylib Mark the output as dead-strippable
   -needed-l<LIB>              Search for a given library
@@ -452,6 +454,10 @@ std::vector<std::string> parse_nonpositional_args(Context<E> &ctx) {
     } else if (read_arg("-macos_version_min")) {
       ctx.arg.platform = PLATFORM_MACOS;
       ctx.arg.platform_min_version = parse_version(ctx, arg);
+    } else if (read_arg("-iphoneos_version_min") || read_arg("-ios_version_min")) {
+      ctx.arg.platform = PLATFORM_IOS;
+      ctx.arg.platform_min_version = parse_version(ctx, arg);
+      ctx.arg.platform_sdk_version = ctx.arg.platform_min_version;
     } else if (read_joined("-hidden-l")) {
       remaining.push_back("-hidden-l");
       remaining.push_back(std::string(arg));
